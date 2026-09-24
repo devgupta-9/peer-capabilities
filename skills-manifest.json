@@ -1,0 +1,807 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "local curated inventory",
+  "notice": "Provenance metadata only. Skill bodies are not redistributed by this public repository.",
+  "skills": [
+    {
+      "name": "antigravity-design-expert",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "f755d5a18ed77ce189823c68613111b46b0fa1d6d9c0f072b88adff2b3a0f0b7",
+      "includedInRepository": false
+    },
+    {
+      "name": "api-and-interface-design",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/api-and-interface-design",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "9e0ed660e3b9249e77cd55bb43cfc7279e3ec0567db6c66b89c581763264963e",
+      "includedInRepository": false
+    },
+    {
+      "name": "ask-matt",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "d686175588bddf69e58f3e8d97e16736420329505c6dc6f088f5626f81aef60b",
+      "includedInRepository": false
+    },
+    {
+      "name": "brain-to-docs",
+      "source": "community",
+      "sourceRepo": "davidondrej/skills",
+      "license": "MIT",
+      "sha256": "2e04da3ae8ca2ee68570a318ed9a9526094f1f8946cff2f6d93808640209855c",
+      "includedInRepository": false
+    },
+    {
+      "name": "browser-testing-with-devtools",
+      "source": "community",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "c969e2a6a5b62745cdae1e2c80abc755e49c0cd19cc80712ba8136a7cd7692c4",
+      "includedInRepository": false
+    },
+    {
+      "name": "canvas-design",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "97e4dfb96730ff1fa6ef377c5b9a4c9f9d02031852ffa457cc1294d5cf1fe813",
+      "includedInRepository": false
+    },
+    {
+      "name": "ci-cd-and-automation",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/ci-cd-and-automation",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "49edeafcca52ff934be0c9a621dfb1d9218d5df9ddd712199091c366058c24a9",
+      "includedInRepository": false
+    },
+    {
+      "name": "ckw-design",
+      "source": "community",
+      "sourceRepo": "connerkward/ckw-design-skill",
+      "license": "MIT",
+      "sha256": "eb10a81851bc96aa22cb461495960d5be558479dff6646ded47df9255acf429b",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-ally-health",
+      "source": "https://github.com/huifer/Claude-Ally-Health",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "1be2bd3dfb68eea543fba5389c54ca1245a4d0f95409e67b3b0880dbf1919004",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-api",
+      "source": "https://github.com/anthropics/skills",
+      "sourceRepo": null,
+      "license": "Complete terms in LICENSE.txt",
+      "sha256": "c7332d0ae1ab712ff09df07fce8ad3eefafeff3dac48e6d9d43dfac02ff1faac",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-code-expert",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "0ed69b093385d5ce2431ce5fd275a31a42fe4db728cea588457a485efdde69ad",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-code-guide",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "6e4e209abd0a6d8a0bdec2ac5af68f753fd756ed1ad244229ae27fe221fe780b",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-d3js-skill",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "b0a0ddd807be00e1a77a3994c59560d74640cb5c3b218ba016c8daab5765f690",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-delegate",
+      "source": "https://github.com/amElnagdy/delegate-skills",
+      "sourceRepo": "amElnagdy/delegate-skills",
+      "license": "MIT",
+      "sha256": "557f592d308aa92723a90f1d0b0a60419b3bd267ad704d0d906590b9478791af",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-in-chrome-troubleshooting",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "a796f4b9396c973455bf2b54497c4ffc87878cac472baadbf77a6bbf31e33bae",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-monitor",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "2bbafa57754f8bab4bda65f67c2d88d6bb019fab4bc765546330d9ecfb9eaf02",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-scientific-skills",
+      "source": "https://github.com/K-Dense-AI/claude-scientific-skills",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "d19560471956dbfef1fb5d94f23c12bd7903979e65240fba0620ce944b6192fc",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-settings-audit",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "f6efc0542de4f293bac330e621d8e70480fe9484ad657b37ab58aa639b7816c4",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-speed-reader",
+      "source": "https://github.com/SeanZoR/claude-speed-reader",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "7836ee4c88503996e5819ccf1578741a938d24a716956259ce8f965adc3661ad",
+      "includedInRepository": false
+    },
+    {
+      "name": "claude-win11-speckit-update-skill",
+      "source": "https://github.com/NotMyself/claude-win11-speckit-update-skill",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "60092e2ad1e48f8568f62b70e315c197bd8a9c5494c266560a3c279eda601d39",
+      "includedInRepository": false
+    },
+    {
+      "name": "code-review-and-quality",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/code-review-and-quality",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "8e7bce542662056895bbf9a31e1334c2d2ebabebb6ab9f6ffb3834752ebbe333",
+      "includedInRepository": false
+    },
+    {
+      "name": "code-simplification",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/code-simplification",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "24ef3f377b50e6245d6d1f07d2b69a2cf61d44d8b2a67802dfb43b201c882772",
+      "includedInRepository": false
+    },
+    {
+      "name": "codebase-design",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "deaf065f4366532a8f6adc69f783125035374fd895a25aee4c6396a38b6a56d3",
+      "includedInRepository": false
+    },
+    {
+      "name": "context-engineering",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/context-engineering",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "8d02fce4cde62a563054d6d944e2e0285efaf9c55d0324a2666a2b2627cc1152",
+      "includedInRepository": false
+    },
+    {
+      "name": "crossframe-critical",
+      "source": "community",
+      "sourceRepo": "xi-kari/crossframe-skill",
+      "license": "MIT",
+      "sha256": "2e6e2a355c22b40e73545dbd10c2bc34b2f90bf90ee127a189743c1abc04a19f",
+      "includedInRepository": false
+    },
+    {
+      "name": "daily-gift",
+      "source": "community",
+      "sourceRepo": "openclaw/skills",
+      "license": "MIT-0",
+      "sha256": "e024ef8a87089477502ba5581f0823c9c6df625ffd6574d0133445cb0ddbde7d",
+      "includedInRepository": false
+    },
+    {
+      "name": "debugging-and-error-recovery",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/debugging-and-error-recovery",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "e9e9b4167dbcaa0211303b2bcd208829d263cb15e0e7f36a2f3e660ebd8e7270",
+      "includedInRepository": false
+    },
+    {
+      "name": "deprecation-and-migration",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/deprecation-and-migration",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "bb6291e29d8f69997b7982ad495a443cfd00894444a7bbcd3edca83a19ae6d4a",
+      "includedInRepository": false
+    },
+    {
+      "name": "design-spatial",
+      "source": "https://github.com/connerkward/ckw-design-skill/tree/main/deterministic-design/design-spatial",
+      "sourceRepo": "connerkward/ckw-design-skill",
+      "license": "MIT",
+      "sha256": "34bfa901d3ee25f3e9d004a5d17728ba423465ce273d1cb2827035ad902d812d",
+      "includedInRepository": false
+    },
+    {
+      "name": "design-taste-frontend",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "818d994ad65462fd21c079618d1cee08c4eb34f656a25a50888675c9b5bf9822",
+      "includedInRepository": false
+    },
+    {
+      "name": "deterministic-design",
+      "source": "community",
+      "sourceRepo": "connerkward/deterministic-design-skill",
+      "license": "MIT",
+      "sha256": "10e8cc4e2f601515a12ff6986833cc8e09ab9b13c74965769d752755e80270c6",
+      "includedInRepository": false
+    },
+    {
+      "name": "diagnosing-bugs",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "d4f3010a0bf688b76b4ccae15cd543f2b4b54d129a1523a09d4b1514de0eab14",
+      "includedInRepository": false
+    },
+    {
+      "name": "documentation-and-adrs",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/documentation-and-adrs",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "1d378307fd45c627de5379d8c5d061eb5676f6017713e6cd42dda93a0d6dec60",
+      "includedInRepository": false
+    },
+    {
+      "name": "domain-modeling",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "8613d4ecbe203684bf204153248ba03a93c99adfc1839a4df94496b631566c2b",
+      "includedInRepository": false
+    },
+    {
+      "name": "doubt-driven-development",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/doubt-driven-development",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "fd7019d00245b2403713a347b6c6b072fbc81426809192098192b468d119ddf6",
+      "includedInRepository": false
+    },
+    {
+      "name": "emil-design-eng",
+      "source": "community",
+      "sourceRepo": "emilkowalski/skills",
+      "license": "MIT",
+      "sha256": "2aa1da6453a16d5e0c167344ba80a5c248fdbb03e2edbcc3ed6f17c0839bda16",
+      "includedInRepository": false
+    },
+    {
+      "name": "ffuf-claude-skill",
+      "source": "https://github.com/jthack/ffuf_claude_skill",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "95729d56b6badb80b4562d033dbe5c2ded2d50089c01892124089e67acb7538b",
+      "includedInRepository": false
+    },
+    {
+      "name": "folder-specific-claude-and-agents-md",
+      "source": "community",
+      "sourceRepo": "davidondrej/skills",
+      "license": "MIT",
+      "sha256": "b69a5357dd4e8859428217b123d620f25b01d824e28233af7c2be57dbe65dee7",
+      "includedInRepository": false
+    },
+    {
+      "name": "frontend-slides-frontend-slides",
+      "source": "https://github.com/zarazhangrui/frontend-slides/tree/main/plugins/frontend-slides/skills/frontend-slides",
+      "sourceRepo": "zarazhangrui/frontend-slides",
+      "license": "MIT",
+      "sha256": "5dd7f3d166cfe7a77643c9ab2e4b9c4f7d4d4dc6d56456ef6eaecd32da066096",
+      "includedInRepository": false
+    },
+    {
+      "name": "frontend-ui-dark-ts",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "a777b1e734ae8ce17b88c0abe17e09e9dc115c720086f769b5936b1437be2dff",
+      "includedInRepository": false
+    },
+    {
+      "name": "frontend-ui-engineering",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/frontend-ui-engineering",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "1665eb95f0c67ba40339851193abb15b82cd95e68b827c5ea236808afb3a1aa6",
+      "includedInRepository": false
+    },
+    {
+      "name": "full-output-enforcement",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "856c731525ce6cc87240a128962280ccded0c9a4b14d158ae8afe86b018b9609",
+      "includedInRepository": false
+    },
+    {
+      "name": "git-workflow-and-versioning",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/git-workflow-and-versioning",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "df60195f3300f56b26e3160638c4257ad148fcd64b7183f374cd1afe29777624",
+      "includedInRepository": false
+    },
+    {
+      "name": "gpt-taste",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "68a7f99ce921135d344db1f0e4184c8eb1c0ba31c1beaacbd35567607b0107d9",
+      "includedInRepository": false
+    },
+    {
+      "name": "graphify",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "3dec19e0616f38aaf142667ee2f2cb2ed7f19262634792f101a38e13fc8d7ca0",
+      "includedInRepository": false
+    },
+    {
+      "name": "grill-me",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "92ce80d4713486eb69342527e40ef7e0a90f99c7e25cc23073aecf47550b246f",
+      "includedInRepository": false
+    },
+    {
+      "name": "grill-with-docs",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "dc67a1aafe0aef37a201dcb2d8563a2d34b152ff71cee9975c116a96407ba740",
+      "includedInRepository": false
+    },
+    {
+      "name": "grilling",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "ae27e5510c4b74eb1379504a857602a6410954446d25f0221714801eecee707f",
+      "includedInRepository": false
+    },
+    {
+      "name": "handoff",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "c0e38832473c81c3bcb498f4461d9d36058e1fec946003b959c7c948e9152eca",
+      "includedInRepository": false
+    },
+    {
+      "name": "high-end-visual-design",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "b78c4ce49ce5f7655ca4969b72603eae2bc5390368c18650ad7d3676abdd4a53",
+      "includedInRepository": false
+    },
+    {
+      "name": "idea-refine",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/idea-refine",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "dfdeb5acf46ae55860d515db4b5f08479e08126a799a9604cab8210f635c8404",
+      "includedInRepository": false
+    },
+    {
+      "name": "implement",
+      "source": "https://github.com/mattpocock/skills/tree/main/skills/engineering/implement",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "b6e5cbbb8ae74e50fbdddfe7a5c8848bb0bac6981974d24f11a539f92632f5a3",
+      "includedInRepository": false
+    },
+    {
+      "name": "improve-codebase-architecture",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "5ec3f325535e2b4202de9bd0b6ed6511ce1c963e840749351b71dc9f1dc776bd",
+      "includedInRepository": false
+    },
+    {
+      "name": "incremental-implementation",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/incremental-implementation",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "04f7fd540ffef0efde29b0ea8373f0d4cfaaa8de62da8e75dd6ce8d50696fff1",
+      "includedInRepository": false
+    },
+    {
+      "name": "industrial-brutalist-ui",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "deefd8048295c8a70d9bfd5afd6a2f49c152432a3cef2f05ecbf530c9b992193",
+      "includedInRepository": false
+    },
+    {
+      "name": "linear-claude-skill",
+      "source": "https://github.com/wrsmith108/linear-claude-skill",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "21cf5b8830d40b1b14448bfe196d2f30cfeb1eaccdc48b06540651cbd468927d",
+      "includedInRepository": false
+    },
+    {
+      "name": "lookdev-auto",
+      "source": "community",
+      "sourceRepo": "connerkward/lookdev-auto-skill",
+      "license": "MIT",
+      "sha256": "7c63b4cc1b2fb98011720262e895be30a8a16736402f203ff2034d35391c1669",
+      "includedInRepository": false
+    },
+    {
+      "name": "minimalist-ui",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "3c156c8d825f3f8035a415cd00b1e6490f52950519aad662cbce9434d0da8e2d",
+      "includedInRepository": false
+    },
+    {
+      "name": "not-a-vibe-coder",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "ea1b91945ada46d069bc52b2d7cbfd2150ad71d52750bd2c24e453157d05de82",
+      "includedInRepository": false
+    },
+    {
+      "name": "observability-and-instrumentation",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/observability-and-instrumentation",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "3afed1cb35aee20e54e8da2dcc5fabbe07e5cad2cb8d432d73db5d75be8b4775",
+      "includedInRepository": false
+    },
+    {
+      "name": "performance-optimization",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/performance-optimization",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "fb97055401a0f94dfb1518c948bc62ef2860e19ac1f1df3ce0c758894d66cb38",
+      "includedInRepository": false
+    },
+    {
+      "name": "planning-and-task-breakdown",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/planning-and-task-breakdown",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "b732a79a26425313bebb1845966a39e930c9461cf4cf090e2ac4dcf060d1c627",
+      "includedInRepository": false
+    },
+    {
+      "name": "ponytail",
+      "source": null,
+      "sourceRepo": null,
+      "license": "MIT",
+      "sha256": "46a57e26a2632e7fa40eae6a3cf3011ccdc4d8db19d8f8617907d6b5deef055e",
+      "includedInRepository": false
+    },
+    {
+      "name": "ponytail-audit",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "49e835c96313009179ec162d80ccc9d91625e387c8af7cd3975c531ba105b2d5",
+      "includedInRepository": false
+    },
+    {
+      "name": "ponytail-debt",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "c0a5c0c0cc843cb53f15b792790946768500b45538d07fadbf0602ed6af63a47",
+      "includedInRepository": false
+    },
+    {
+      "name": "ponytail-gain",
+      "source": "`benchmarks/` and the README.",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "f8847c410b54978fff41eab775fc754d41ede19ad6fb72fac799b65616cc6683",
+      "includedInRepository": false
+    },
+    {
+      "name": "ponytail-help",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "07e0fc50c722cee981d47f62a5d32a7def4cb65651f414724e5fd6939f145977",
+      "includedInRepository": false
+    },
+    {
+      "name": "ponytail-review",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "6c8b7e5c897a406b66da6aabda7fa6509e8d1d447e73e602265d7986497445d1",
+      "includedInRepository": false
+    },
+    {
+      "name": "prototype",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "cab0f8a32144977472467f304fed7e834352591edb0561e7c971724c3cd1fee8",
+      "includedInRepository": false
+    },
+    {
+      "name": "redesign-existing-projects",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "29e6207596f8221ba9933b4e7cb1331f10e1f446c22f56f328ac61608102e858",
+      "includedInRepository": false
+    },
+    {
+      "name": "resolving-merge-conflicts",
+      "source": "https://github.com/mattpocock/skills/tree/main/skills/engineering/resolving-merge-conflicts",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "9e64d8fff748cfb42373c4fc503feeef66589f08620259a1367cb5e5e5b935a3",
+      "includedInRepository": false
+    },
+    {
+      "name": "screenstudio-alt",
+      "source": "community",
+      "sourceRepo": "connerkward/screenstudio-alternative-skill",
+      "license": "MIT",
+      "sha256": "3ac6031fe52168cc3904bb8f4c66c00642e22a45fbfa10b67353cca0bef86094",
+      "includedInRepository": false
+    },
+    {
+      "name": "security-and-hardening",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/security-and-hardening",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "bf9e79ee8d91eb17a31ece3152ebbd98d44bfca342e269d703c05057320df4de",
+      "includedInRepository": false
+    },
+    {
+      "name": "setup-matt-pocock-skills",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "094f6b1fbc485747ae4826a5bb621453f2269c80d5b6d3c3f5fcebe30f2bf54a",
+      "includedInRepository": false
+    },
+    {
+      "name": "sharp-coder",
+      "source": "self",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "be2cb3cc151723033143dc6044db6576626236407d3859bdf2394d41e4c64283",
+      "includedInRepository": false
+    },
+    {
+      "name": "shipping-and-launch",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/shipping-and-launch",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "a970dc02a9cdbf00d76ce9fb1829a6186aaf665f0ac2871d488b691e2d618574",
+      "includedInRepository": false
+    },
+    {
+      "name": "skill-improver",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "7167d277f3677c00e5effb1acdafb362f0553e82e37f3fdf3a4dabfe3cf2475d",
+      "includedInRepository": false
+    },
+    {
+      "name": "source-driven-development",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/source-driven-development",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "859595f2063e5a44b345dfa04139c7600ad45e75e4c42edf14bd33e1aed920e6",
+      "includedInRepository": false
+    },
+    {
+      "name": "spec-driven-development",
+      "source": "https://github.com/addyosmani/agent-skills/tree/main/skills/spec-driven-development",
+      "sourceRepo": "addyosmani/agent-skills",
+      "license": "MIT",
+      "sha256": "f8380582d821d23b7d23cbd41701562e4889c5c4f45a02f32b540b1d4853e53e",
+      "includedInRepository": false
+    },
+    {
+      "name": "spec-driven-loop",
+      "source": "self",
+      "sourceRepo": "Linji-x/spec-driven-loop",
+      "license": "MIT",
+      "sha256": "94ca7fb782949a645cd9454ebf5a1a91874b7b7e7a4f59a2ba6910af31eaaed1",
+      "includedInRepository": false
+    },
+    {
+      "name": "stitch-design-taste",
+      "source": "community",
+      "sourceRepo": "Leonxlnx/taste-skill",
+      "license": null,
+      "sha256": "3ee4e208eb74a1ad05616886b86f4c7ef1377643c78f6745d1720f0ae86a7a78",
+      "includedInRepository": false
+    },
+    {
+      "name": "tdd",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "0eb6630a004ebf6124bc052f2e66d1eea489dedecfbab698bf87c576971c8e20",
+      "includedInRepository": false
+    },
+    {
+      "name": "teach",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "15a96d96a8c2c4b1f0efad632c204bf30e4461d18cde849bf22cea51612085ec",
+      "includedInRepository": false
+    },
+    {
+      "name": "to-issues",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "631accb8bbba60eb77abe6dcd9f7c4636fb40cf23c1bbcdb7d9c4caabbf5b1bf",
+      "includedInRepository": false
+    },
+    {
+      "name": "to-prd",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "91a53f03fa89f382fe1708ed9065e8944b3d51324ebf5b3cfc075b0fda76122a",
+      "includedInRepository": false
+    },
+    {
+      "name": "triage",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "35ff14a1d97478d0346ac02b9ba7ce29b6dfd0aae04c1eae27c5aba9dc368c84",
+      "includedInRepository": false
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "6af744a0222c3387b8765e15ac7b114fff34ab997ae64641bc614fc9e7545b85",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "dd083d887e4f6dbf7f42ea332f63807e6e073292bb1c8a12dcdc77a552c7d81c",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-chat",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "bd982a64ee1691733dd4684fb1f6dfc833e28ada6c73a8c1db4611113fbc0a23",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-dashboard",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "7c0b3a9db4e4f0d254b33a41096bf3a3338c6f32d0cc39b6552f6b7b63d06a8e",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-diff",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "0d99e1140812a336025c6779899ef0f439ae0fba115527f98695e57a2ba12245",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-domain",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "bb4c9b652616cbf03913333783837dd87d158700efd5bad80144120d6555f8ce",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-explain",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "e8c10dcae7e9ba7eca136b4b27290f0362d5d0e0388209ff7dc33c50390544b9",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-figma",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "4cad5f9f74d6df58d185c276b7646a1ac841168fe44e1b19771f1fa23c93ef65",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-knowledge",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "bf3fdd448fceace2cf9948228d6db3b9d899a2e7468795f1d5e00f2270ac8d85",
+      "includedInRepository": false
+    },
+    {
+      "name": "understand-onboard",
+      "source": null,
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "65c50b19f5340a8ec817dab86e0f83e8aee353a9f3acb7ca9421cbfab143498a",
+      "includedInRepository": false
+    },
+    {
+      "name": "varlock-claude-skill",
+      "source": "https://github.com/wrsmith108/varlock-claude-skill",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "ed2b61b8e0540b0960818cb0c2b0aa43f32a91e846393337f4db78290021295a",
+      "includedInRepository": false
+    },
+    {
+      "name": "visual-emotion-engineer",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "51b273ee368d50e7f2d0f84f5b2830478eedc8d219932fd7a24e5bf8fff23079",
+      "includedInRepository": false
+    },
+    {
+      "name": "writing-great-skills",
+      "source": "community",
+      "sourceRepo": "mattpocock/skills",
+      "license": "MIT",
+      "sha256": "6d359ad4441a413c49ff0faea1dada87efc8ddad203e2de5a53b67d4842dd8d6",
+      "includedInRepository": false
+    },
+    {
+      "name": "writing-plans",
+      "source": "community",
+      "sourceRepo": null,
+      "license": null,
+      "sha256": "b811a28a811ed3c00c6d99074a6a7a1aa31089673a99551824925fa041a16f64",
+      "includedInRepository": false
+    }
+  ]
+}

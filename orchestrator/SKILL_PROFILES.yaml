@@ -1,0 +1,52 @@
+# AI Orchestrator Skill Bundles
+# Advisory starting points: choose only task-relevant skills, possibly across profiles.
+# These profiles do not automatically inject skills or configure Headroom.
+
+profiles:
+  backend:
+    description: Core backend engineering and API design.
+    skills:
+      - api-and-interface-design
+      - domain-modeling
+      - tdd
+      - security-and-hardening
+      - observability-and-instrumentation
+
+  frontend:
+    description: Core UI implementation and browser testing.
+    skills:
+      - frontend-ui-engineering
+      - design-taste-frontend
+      - browser-testing-with-devtools
+
+  architecture:
+    description: System architecture, code design, and documentation.
+    skills:
+      - codebase-design
+      - context-engineering
+      - documentation-and-adrs
+      - improve-codebase-architecture
+
+  premium-ui:
+    description: High-end visual design and taste for advanced interactive UIs.
+    skills:
+      - high-end-visual-design
+      - deterministic-design
+      - redesign-existing-projects
+
+  debugging:
+    description: Root cause analysis and triage.
+    skills:
+      - diagnosing-bugs
+      - debugging-and-error-recovery
+      - triage
+
+  shipping:
+    description: PR preparation, code review, and launch prep.
+    skills:
+      - shipping-and-launch
+      - git-workflow-and-versioning
+      - code-review-and-quality
+
+# Read each selected skill's actual scope; VENDOR_SCOPES.yaml provides advisory hints.
+# A claude-prefixed name alone does not make a general-purpose skill inapplicable.

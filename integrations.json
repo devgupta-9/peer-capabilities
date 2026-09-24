@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "tokens": ["${ORIGIN}", "${NODE_BIN}", "${AGY_BIN}", "${UV_BIN}"],
+  "sharedServers": {
+    "peer-agents": {
+      "command": "${NODE_BIN}",
+      "args": ["${ORIGIN}\\peer-agents\\dist\\index.js"],
+      "env": {"PEER_AGY_BIN": "${AGY_BIN}"}
+    },
+    "graphify": {
+      "command": "${UV_BIN}\\graphify-mcp.exe",
+      "args": []
+    },
+    "headroom": {
+      "command": "${UV_BIN}\\headroom.exe",
+      "args": ["mcp", "serve"]
+    },
+    "jev": {
+      "command": "${NODE_BIN}",
+      "args": ["${ORIGIN}\\tools\\jev\\node_modules\\@jkudish\\jev-mcp\\dist\\index.js"]
+    }
+  },
+  "antigravityReview": {
+    "artifactReviewMode": "ARTIFACT_REVIEW_MODE_ALWAYS",
+    "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_OFF",
+    "browserJsExecutionPolicy": "BROWSER_JS_EXECUTION_POLICY_ALWAYS_ASK"
+  }
+}

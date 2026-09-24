@@ -1,0 +1,22 @@
+# Advisory scope hints. The skill's actual description and instructions decide.
+schema_version: 1
+claude_interoperability_only:
+  - claude-api
+  - claude-code-expert
+  - claude-code-guide
+  - claude-delegate
+  - claude-in-chrome-troubleshooting
+  - claude-monitor
+  - claude-settings-audit
+  - claude-speed-reader
+purpose_based_not_prefix_based:
+  - claude-d3js-skill
+  - claude-scientific-skills
+  - claude-win11-speckit-update-skill
+  - folder-specific-claude-and-agents-md
+  - linear-claude-skill
+  - varlock-claude-skill
+notes:
+  - These are human/agent hints, not an implemented automatic filter.
+  - Security, health, and external-service skills retain their own scope and safety requirements.
+  - Plugin-managed skills remain owned by their host.

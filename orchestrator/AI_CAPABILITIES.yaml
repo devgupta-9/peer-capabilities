@@ -1,0 +1,21 @@
+schema_version: 1
+inventory_generator: %USERPROFILE%\.ai-rules\scripts\validate.ps1
+latest_observations: %USERPROFILE%\.ai-rules\reports\latest.json
+semantics:
+  configured: found in the inspected host configuration
+  enabled: derived from that host's actual enable flag
+  installed: local executable or entrypoint exists
+  discovered: fresh MCP initialize and tools/list succeeded at observed_at
+  authenticated: unknown unless a relevant authenticated operation was tested
+  loaded_in_session: unknown unless tested inside that host session
+  plugin_enabled: host configuration flag only; not proof of MCP availability
+shared_local_servers:
+  - peer-agents
+  - graphify
+  - headroom
+  - jev
+notes:
+  - Other integrations may intentionally differ between hosts.
+  - On-demand disabled servers remain disabled until a task needs them.
+  - Model catalogs do not prove account access or backend identity.
+  - Static inventory never substitutes for timestamped runtime evidence.

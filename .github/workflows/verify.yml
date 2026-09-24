@@ -1,0 +1,56 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            peer-agents/package-lock.json
+            tools/jev/package-lock.json
+      - name: Secret and portability gate
+        shell: pwsh
+        run: ./scripts/secret-scan.ps1
+      - name: Parse PowerShell
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count) {
+              $failed = $true
+              $errors | ForEach-Object { Write-Error "$($_.Extent.File): $($_.Message)" }
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Test synchronization safety
+        shell: pwsh
+        run: ./scripts/test-sync.ps1
+      - name: Build and test peer bridge
+        working-directory: peer-agents
+        shell: pwsh
+        run: |
+          npm ci --ignore-scripts
+          npm run typecheck
+          npm run build
+          npm test
+          npm audit --omit=dev --audit-level=high
+      - name: Audit Jev runtime dependencies
+        working-directory: tools/jev
+        shell: pwsh
+        run: |
+          npm ci --omit=dev --ignore-scripts
+          npm audit --omit=dev --audit-level=high
