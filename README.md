@@ -66,4 +66,4 @@ After an MCP upgrade, restart/reconnect both hosts. A fresh-process probe proves
 | `scripts/` | Sync, validation, safety, and probe utilities |
 | `integrations.json` | Secret-free portable expectations |
 
-No license is granted merely by this repository being public. Repository owners should choose an explicit license before inviting redistribution.
+Original repository content is available under the [MIT License](LICENSE). Installed third-party tools and dependencies remain governed by their respective upstream licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
