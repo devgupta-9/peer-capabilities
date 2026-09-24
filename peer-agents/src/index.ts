@@ -1,7 +1,6 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,24 +8,27 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { effortSchema, parseCodexCatalog, validateChoice, type ModelChoice } from './model-policy.js';
+import { authorizeWorkingDirectory } from './path-policy.js';
+import { runCapture, truncate } from './process.js';
+import { finalizeImplementationWorktree, type ImplementationPatch } from './worktree.js';
 
 type AgentName = 'codex' | 'antigravity';
 type Mode = 'READ_ONLY' | 'REVIEW' | 'IMPLEMENT';
 
-type CaptureResult = {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  durationMs: number;
-};
-
-const SERVER_VERSION = '0.2.0';
+const SERVER_VERSION = '0.3.0';
 const MAX_TIMEOUT_SECONDS = 1800;
 const DEFAULT_TIMEOUT_SECONDS = 600;
-const MAX_OUTPUT_BYTES = Number(process.env.PEER_AGENTS_MAX_OUTPUT_BYTES ?? 262_144);
-const MAX_TASK_CHARS = Number(process.env.PEER_AGENTS_MAX_TASK_CHARS ?? 24_000);
-const DELEGATION_DEPTH = Number(process.env.PEER_AGENTS_DEPTH ?? '0');
+const parsedMaxTaskChars = Number(process.env.PEER_AGENTS_MAX_TASK_CHARS ?? 24_000);
+const MAX_TASK_CHARS = Number.isSafeInteger(parsedMaxTaskChars)
+  && parsedMaxTaskChars > 0
+  && parsedMaxTaskChars <= 100_000
+  ? parsedMaxTaskChars
+  : 24_000;
+const MAX_ANTIGRAVITY_ARGV_PROMPT_CHARS = 20_000;
+const parsedDelegationDepth = Number(process.env.PEER_AGENTS_DEPTH ?? '0');
+const DELEGATION_DEPTH = Number.isSafeInteger(parsedDelegationDepth) && parsedDelegationDepth >= 0
+  ? parsedDelegationDepth
+  : 1;
 
 async function codexCatalog() {
   const catalogPath = path.join(process.env.CODEX_HOME ?? path.join(homedir(), '.codex'), 'models_cache.json');
@@ -40,115 +42,11 @@ async function codexCatalog() {
   }
 }
 
-function truncate(value: string, maxBytes = MAX_OUTPUT_BYTES): string {
-  const buffer = Buffer.from(value, 'utf8');
-  if (buffer.length <= maxBytes) return value;
-  return Buffer.concat([
-    buffer.subarray(0, maxBytes),
-    Buffer.from(`\n\n[truncated by peer-agents after ${maxBytes} bytes]`, 'utf8'),
-  ]).toString('utf8');
-}
-
 function toolText(payload: unknown, isError = false) {
   return {
     content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
     ...(isError ? { isError: true } : {}),
   };
-}
-
-function killProcessTree(child: ReturnType<typeof spawn>) {
-  if (!child.pid) return;
-  try {
-    if (process.platform === 'win32') {
-      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      killer.unref();
-    } else {
-      child.kill('SIGKILL');
-    }
-  } catch {
-    try {
-      child.kill('SIGKILL');
-    } catch {
-      // Best effort only.
-    }
-  }
-}
-
-async function runCapture(
-  command: string,
-  args: string[],
-  options: {
-    cwd?: string;
-    timeoutSeconds?: number;
-    env?: NodeJS.ProcessEnv;
-  } = {},
-): Promise<CaptureResult> {
-  const started = Date.now();
-  const timeoutSeconds = Math.min(
-    Math.max(options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS, 1),
-    MAX_TIMEOUT_SECONDS,
-  );
-
-  return await new Promise<CaptureResult>((resolve, reject) => {
-    let stdout = '';
-    let stderr = '';
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let timedOut = false;
-    let settled = false;
-
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env ?? process.env,
-      shell: false,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killProcessTree(child);
-    }, timeoutSeconds * 1000);
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (stdoutBytes < MAX_OUTPUT_BYTES) {
-        const remaining = MAX_OUTPUT_BYTES - stdoutBytes;
-        stdout += chunk.subarray(0, remaining).toString('utf8');
-        stdoutBytes += Math.min(chunk.length, remaining);
-      }
-    });
-
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderrBytes < MAX_OUTPUT_BYTES) {
-        const remaining = MAX_OUTPUT_BYTES - stderrBytes;
-        stderr += chunk.subarray(0, remaining).toString('utf8');
-        stderrBytes += Math.min(chunk.length, remaining);
-      }
-    });
-
-    child.once('error', (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(error);
-    });
-
-    child.once('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({
-        code,
-        stdout: truncate(stdout),
-        stderr: truncate(stderr),
-        timedOut,
-        durationMs: Date.now() - started,
-      });
-    });
-  });
 }
 
 async function commandVersion(command: string): Promise<string | null> {
@@ -299,53 +197,6 @@ async function prepareImplementationWorktree(cwd: string): Promise<{
   return { root, worktree, runId };
 }
 
-async function finalizeImplementationWorktree(input: {
-  root: string;
-  worktree: string;
-  runId: string;
-  target: AgentName;
-}): Promise<{ patchPath: string | null; patchBytes: number; cleanupWarning?: string }> {
-  const add = await runCapture('git', ['-C', input.worktree, 'add', '-A'], { timeoutSeconds: 30 });
-  if (add.code !== 0) {
-    throw new Error(`Failed to stage delegated worktree changes for patch export: ${add.stderr || add.stdout}`);
-  }
-
-  const diff = await runCapture(
-    'git',
-    ['-C', input.worktree, 'diff', '--cached', '--binary', '--no-color', '--full-index'],
-    { timeoutSeconds: 60 },
-  );
-  if (diff.code !== 0) {
-    throw new Error(`Failed to export delegated patch: ${diff.stderr || diff.stdout}`);
-  }
-
-  let patchPath: string | null = null;
-  let patchBytes = 0;
-  if (diff.stdout.trim()) {
-    const runDir = path.join(homedir(), '.peer-agents', 'runs');
-    await mkdir(runDir, { recursive: true });
-    patchPath = path.join(runDir, `${input.runId}-${input.target}.patch`);
-    await writeFile(patchPath, diff.stdout, 'utf8');
-    patchBytes = Buffer.byteLength(diff.stdout, 'utf8');
-  }
-
-  let cleanupWarning: string | undefined;
-  const remove = await runCapture('git', ['-C', input.root, 'worktree', 'remove', '--force', input.worktree], {
-    timeoutSeconds: 60,
-  });
-  if (remove.code !== 0) {
-    cleanupWarning = `Temporary worktree cleanup failed; inspect ${input.worktree}. ${remove.stderr || remove.stdout}`;
-  } else if (existsSync(input.worktree)) {
-    try {
-      await rm(input.worktree, { recursive: true, force: true });
-    } catch {
-      cleanupWarning = `Git detached the worktree but the temporary directory remains at ${input.worktree}.`;
-    }
-  }
-
-  return { patchPath, patchBytes, cleanupWarning };
-}
-
 async function runCodex(input: {
   prompt: string;
   cwd: string;
@@ -365,16 +216,22 @@ async function runCodex(input: {
     input.mode === 'IMPLEMENT' ? 'workspace-write' : 'read-only',
     '--config',
     `model_reasoning_effort="${choice.effort}"`,
+    '--config',
+    'mcp_servers.peer-agents.enabled=false',
   ];
-  if (input.mode !== 'IMPLEMENT') args.push('--skip-git-repo-check');
   if (choice.model) args.push('--model', choice.model);
-  args.push(input.prompt);
+  args.push('-');
 
-  const env = { ...process.env, PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1) };
+  const env = {
+    ...process.env,
+    PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1),
+    PEER_AGENTS_ALLOWED_ROOTS: input.cwd,
+  };
   const result = await runCapture(CODEX_BIN, args, {
     cwd: input.cwd,
     timeoutSeconds: input.timeoutSeconds,
     env,
+    input: input.prompt,
   });
 
   if (result.timedOut) throw new Error(`Codex delegation timed out after ${input.timeoutSeconds}s.`);
@@ -403,6 +260,11 @@ async function runAntigravity(input: {
   usage?: unknown;
   conversationId?: string;
 }> {
+  if (input.prompt.length > MAX_ANTIGRAVITY_ARGV_PROMPT_CHARS) {
+    throw new Error(
+      `Antigravity delegation prompt exceeds the Windows-safe argument limit (${MAX_ANTIGRAVITY_ARGV_PROMPT_CHARS} characters). Shorten the task or deliverable.`,
+    );
+  }
   const choice = input.choice;
   const args = [
     '-p',
@@ -422,7 +284,11 @@ async function runAntigravity(input: {
   if (input.mode !== 'IMPLEMENT') args.push('--disable-slash-commands');
   if (choice.model) args.push('--model', choice.model);
 
-  const env = { ...process.env, PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1) };
+  const env = {
+    ...process.env,
+    PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1),
+    PEER_AGENTS_ALLOWED_ROOTS: input.cwd,
+  };
   const result = await runCapture(process.env.PEER_AGY_BIN ?? 'agy', args, {
     cwd: input.cwd,
     timeoutSeconds: input.timeoutSeconds + 15,
@@ -521,6 +387,8 @@ function createServer(): McpServer {
           IMPLEMENT:
             'Peer works in an isolated temporary Git worktree; the bridge exports a patch under ~/.peer-agents/runs and never applies it automatically.',
         },
+        workingDirectoryPolicy:
+          'Delegation requires a Git repository inside PEER_AGENTS_ALLOWED_ROOTS, or inside the repository that launched the MCP server when no roots are configured.',
       });
     },
   );
@@ -540,6 +408,7 @@ function createServer(): McpServer {
           .describe('Smallest self-contained work package the peer should perform.'),
         cwd: z
           .string()
+          .refine((value) => path.isAbsolute(value), 'cwd must be an absolute path')
           .optional()
           .describe('Absolute project/repository directory. Defaults to the MCP server working directory.'),
         mode: z.enum(['READ_ONLY', 'REVIEW', 'IMPLEMENT']).default('READ_ONLY'),
@@ -565,9 +434,14 @@ function createServer(): McpServer {
       }
 
       const target: AgentName = caller === 'codex' ? 'antigravity' : 'codex';
-      const requestedCwd = path.resolve(cwd ?? process.cwd());
-      if (!existsSync(requestedCwd)) {
-        return toolText({ ok: false, error: `Working directory does not exist: ${requestedCwd}` }, true);
+      let requestedCwd: string;
+      try {
+        requestedCwd = (await authorizeWorkingDirectory(cwd ?? process.cwd())).cwd;
+      } catch (error) {
+        return toolText(
+          { ok: false, error: error instanceof Error ? error.message : String(error) },
+          true,
+        );
       }
 
       let executionCwd = requestedCwd;
@@ -602,9 +476,7 @@ function createServer(): McpServer {
           }
         }
 
-        let patch:
-          | { patchPath: string | null; patchBytes: number; cleanupWarning?: string }
-          | undefined;
+        let patch: ImplementationPatch | undefined;
         if (isolated) {
           patch = await finalizeImplementationWorktree({ ...isolated, target });
         }
@@ -637,17 +509,6 @@ function createServer(): McpServer {
               : undefined,
         }, Boolean(policyViolation));
       } catch (error) {
-        if (isolated) {
-          try {
-            await runCapture(
-              'git',
-              ['-C', isolated.root, 'worktree', 'remove', '--force', isolated.worktree],
-              { timeoutSeconds: 30 },
-            );
-          } catch {
-            // Best effort; error response includes worktree path below.
-          }
-        }
         return toolText(
           {
             ok: false,

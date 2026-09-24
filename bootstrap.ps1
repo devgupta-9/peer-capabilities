@@ -8,6 +8,7 @@ if (-not $IsWindows) { throw 'This bootstrap currently supports Windows only.' }
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
 
 $repository = 'https://github.com/devgupta-9/peer-capabilities.git'
+$release = 'v0.3.0'
 $target = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.ai-rules'
 $git = Get-Command git -ErrorAction Stop
 
@@ -26,10 +27,19 @@ if (Test-Path -LiteralPath $target) {
     if ((& $git.Source -C $target status --porcelain).Count) {
         throw "Refusing to update a dirty checkout: $target"
     }
-    & $git.Source -C $target pull --ff-only origin main
-    if ($LASTEXITCODE -ne 0) { throw 'Could not fast-forward the local configuration repository.' }
+    & $git.Source -C $target fetch --depth 1 origin "refs/tags/${release}:refs/tags/${release}"
+    if ($LASTEXITCODE -ne 0) { throw "Could not fetch immutable release $release." }
+    $currentCommit = (& $git.Source -C $target rev-parse HEAD).Trim()
+    $releaseCommit = (& $git.Source -C $target rev-list -n 1 $release).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $releaseCommit) { throw "Could not resolve release $release." }
+    if ($currentCommit -ne $releaseCommit) {
+        Write-Host "Updating peer-capabilities from $currentCommit to release $release ($releaseCommit)"
+        & $git.Source -C $target diff --stat $currentCommit $releaseCommit
+    }
+    & $git.Source -C $target checkout --detach $release
+    if ($LASTEXITCODE -ne 0) { throw "Could not check out release $release." }
 } else {
-    & $git.Source clone --branch main --depth 1 $repository $target
+    & $git.Source clone --branch $release --depth 1 $repository $target
     if ($LASTEXITCODE -ne 0) { throw 'Could not clone the configuration repository.' }
 }
 

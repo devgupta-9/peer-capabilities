@@ -1,11 +1,11 @@
 {
   "schemaVersion": 2,
-  "tokens": ["${ORIGIN}", "${NODE_BIN}", "${AGY_BIN}", "${UV_BIN}"],
+  "tokens": ["${ORIGIN}", "${NODE_BIN}", "${AGY_BIN}", "${CODEX_PEER_BIN}", "${UV_BIN}"],
   "sharedServers": {
     "peer-agents": {
       "command": "${NODE_BIN}",
       "args": ["${ORIGIN}\\peer-agents\\dist\\index.js"],
-      "env": {"PEER_AGY_BIN": "${AGY_BIN}"}
+      "env": {"PEER_AGY_BIN": "${AGY_BIN}", "PEER_CODEX_BIN": "${CODEX_PEER_BIN}"}
     },
     "graphify": {
       "command": "${UV_BIN}\\graphify-mcp.exe",

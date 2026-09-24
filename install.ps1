@@ -3,7 +3,8 @@ param(
     [switch]$DryRun,
     [switch]$SkipToolInstall,
     [switch]$SkipMcpRegistration,
-    [switch]$SkipHeadroomProxy
+    [switch]$SkipHeadroomProxy,
+    [switch]$SkipAntigravitySafety
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,6 +30,44 @@ function Resolve-Tool([string]$Name) {
     return $command.Source
 }
 
+function Resolve-NativeCodexExecutable {
+    $applications = @(Get-Command 'codex.exe' -CommandType Application -All -ErrorAction SilentlyContinue)
+    foreach ($application in $applications) {
+        if (Test-Path -LiteralPath $application.Source -PathType Leaf) { return $application.Source }
+    }
+    $npmPackageRoot = Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai'
+    if (Test-Path -LiteralPath $npmPackageRoot -PathType Container) {
+        $candidate = Get-ChildItem -LiteralPath $npmPackageRoot -Filter 'codex.exe' -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
+    throw 'A native codex.exe could not be resolved. PowerShell and cmd shims cannot be launched safely by peer-agents with shell=false.'
+}
+
+function Backup-LocalConfig([string]$Path, [string]$Name) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    New-Item -ItemType Directory -Path $installBackup -Force | Out-Null
+    Copy-Item -LiteralPath $Path -Destination (Join-Path $installBackup $Name) -Force
+}
+
+function Read-JsonHashtable([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @{} }
+    try {
+        return [IO.File]::ReadAllText($Path) | ConvertFrom-Json -AsHashtable
+    } catch {
+        throw "Cannot safely update invalid JSON configuration: $Path"
+    }
+}
+
+function Write-JsonHashtable([string]$Path, [hashtable]$Value) {
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    $temporary = $Path + '.peer-capabilities.tmp'
+    $json = $Value | ConvertTo-Json -Depth 100
+    [IO.File]::WriteAllText($temporary, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    Move-Item -LiteralPath $temporary -Destination $Path -Force
+}
+
 function Invoke-Checked {
     param([string]$Command, [string[]]$Arguments, [switch]$Quiet)
     $display = $Command + ' ' + (($Arguments | ForEach-Object {
@@ -42,7 +81,10 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw ("Command failed with exit code {0}: {1}" -f $LASTEXITCODE,$display) }
 }
 
-function Ensure-UvTool([string]$Package, [string]$Version, [string]$Requirement, [string]$RequiredModule = '') {
+function Ensure-UvTool([string]$Package, [string]$Version, [string]$Requirement, [string]$LockFile, [string]$RequiredModule = '') {
+    if (-not (Test-Path -LiteralPath $LockFile -PathType Leaf)) {
+        throw "Dependency lock file is missing: $LockFile"
+    }
     $listing = @(& $script:uvPath tool list)
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect installed uv tools.' }
     $versionMatches = $listing -match ('^' + [regex]::Escape($Package) + ' v' + [regex]::Escape($Version) + '$')
@@ -63,6 +105,7 @@ function Ensure-UvTool([string]$Package, [string]$Version, [string]$Requirement,
     $alreadyInstalled = $listing -match ('^' + [regex]::Escape($Package) + ' v')
     $arguments = @('tool','install')
     if ($alreadyInstalled) { $arguments += '--force' }
+    $arguments += @('--with-requirements',$LockFile)
     $arguments += $Requirement
     try {
         Invoke-Checked $script:uvPath $arguments
@@ -138,34 +181,51 @@ function Register-AntigravityMcp {
     Invoke-Checked $script:agyPath @('mcp','enable',$Name)
 }
 
-function Set-AntigravityReviewSettings {
-    $path = Join-Path $userRoot '.gemini\config\config.json'
-    if (-not (Test-Path -LiteralPath $path)) {
-        Write-Warning 'Antigravity IDE config.json is absent; review settings were not changed.'
-        return
-    }
+function Set-AntigravitySafetySettings {
+    $idePath = Join-Path $userRoot '.gemini\config\config.json'
+    $cliPath = Join-Path $userRoot '.gemini\antigravity-cli\settings.json'
     if ($DryRun) {
-        Write-Host '[dry-run] enforce Antigravity artifact, command, and browser-JavaScript review settings'
+        Write-Host '[dry-run] back up and enforce Antigravity review, Git-deny, and broad-trust safety settings'
         return
     }
-    $text = [IO.File]::ReadAllText($path)
+
+    Backup-LocalConfig $idePath 'antigravity-config.json'
+    Backup-LocalConfig $cliPath 'antigravity-cli-settings.json'
+
+    $ide = Read-JsonHashtable $idePath
+    if (-not $ide.ContainsKey('userSettings') -or $ide.userSettings -isnot [hashtable]) {
+        $ide.userSettings = @{}
+    }
     $expectations = [ordered]@{
         artifactReviewMode = 'ARTIFACT_REVIEW_MODE_ALWAYS'
         autoExecutionPolicy = 'CASCADE_COMMANDS_AUTO_EXECUTION_OFF'
         browserJsExecutionPolicy = 'BROWSER_JS_EXECUTION_POLICY_ALWAYS_ASK'
     }
     foreach ($entry in $expectations.GetEnumerator()) {
-        $pattern = '(?<prefix>"' + [regex]::Escape($entry.Key) + '"\s*:\s*)"[^"]*"'
-        if (-not [regex]::IsMatch($text, $pattern)) {
-            Write-Warning "Antigravity setting was not found: $($entry.Key)"
-            continue
-        }
-        $replacement = '$' + '{prefix}"' + $entry.Value + '"'
-        $text = [regex]::Replace($text, $pattern, $replacement, 1)
+        $ide.userSettings[$entry.Key] = $entry.Value
     }
-    $temporary = $path + '.peer-capabilities.tmp'
-    [IO.File]::WriteAllText($temporary, $text, [Text.UTF8Encoding]::new($false))
-    Move-Item -LiteralPath $temporary -Destination $path -Force
+    Write-JsonHashtable $idePath $ide
+
+    $cli = Read-JsonHashtable $cliPath
+    if (-not $cli.ContainsKey('permissions') -or $cli.permissions -isnot [hashtable]) {
+        $cli.permissions = @{}
+    }
+    $denyRule = 'command(regex:git (push|pull|fetch|merge|rebase|checkout|switch|reset|restore|stash|clean|commit|add|rm|mv).*)'
+    $deny = @($cli.permissions.deny | Where-Object { $_ -is [string] })
+    if (-not ($deny | Where-Object { $_ -match 'push\|pull\|fetch\|merge' })) {
+        $deny += $denyRule
+    }
+    $cli.permissions.deny = $deny
+
+    $broadTrust = @(
+        (Join-Path $env:SystemRoot 'System32').TrimEnd('\').ToLowerInvariant(),
+        $userRoot.TrimEnd('\').ToLowerInvariant(),
+        'd:'
+    )
+    $cli.trustedWorkspaces = @($cli.trustedWorkspaces | Where-Object {
+        $_ -is [string] -and $_.TrimEnd('\').ToLowerInvariant() -notin $broadTrust
+    })
+    Write-JsonHashtable $cliPath $cli
 }
 
 function Test-HeadroomHealth {
@@ -209,6 +269,7 @@ $nodePath = Resolve-Tool 'node'
 $npmPath = Resolve-Tool 'npm'
 $uvPath = Resolve-Tool 'uv'
 $codexPath = Resolve-Tool 'codex'
+$codexPeerPath = Resolve-NativeCodexExecutable
 $agyPath = Resolve-Tool 'agy'
 
 $nodeVersion = (& $nodePath --version).TrimStart('v')
@@ -236,8 +297,8 @@ if (-not $SkipToolInstall) {
     } finally {
         Pop-Location
     }
-    Ensure-UvTool 'graphifyy' '0.9.63' 'graphifyy[mcp]==0.9.63' 'mcp'
-    Ensure-UvTool 'headroom-ai' '0.37.0' 'headroom-ai==0.37.0'
+    Ensure-UvTool 'graphifyy' '0.9.63' 'graphifyy[mcp]==0.9.63' (Join-Path $origin 'tools\graphify\requirements.lock') 'mcp'
+    Ensure-UvTool 'headroom-ai' '0.37.0' 'headroom-ai==0.37.0' (Join-Path $origin 'tools\headroom\requirements.lock')
 } else {
     Write-Host '2/7 Skipping local tool installation by request'
 }
@@ -265,14 +326,18 @@ if (Test-Path -LiteralPath $duplicateRules) {
     }
 }
 Invoke-Checked (Resolve-Tool 'pwsh') @('-NoProfile','-File',(Join-Path $origin 'scripts\sync.ps1'),'-Apply')
-Set-AntigravityReviewSettings
+if ($SkipAntigravitySafety) {
+    Write-Host 'Antigravity safety policy changes were skipped by request'
+} else {
+    Set-AntigravitySafetySettings
+}
 
 Write-Host '4/7 Configuring Headroom routing'
 Install-HeadroomRouting $headroomPath
 
 if (-not $SkipMcpRegistration) {
     Write-Host '5/7 Registering shared MCP servers'
-    $peerEnvironment = @{ PEER_AGY_BIN = $agyPath }
+    $peerEnvironment = @{ PEER_AGY_BIN = $agyPath; PEER_CODEX_BIN = $codexPeerPath }
     Register-CodexMcp -Name 'peer-agents' -Command $nodePath -Arguments @($peerPath) -Environment $peerEnvironment -TimeoutSeconds 1860
     Register-CodexMcp -Name 'graphify' -Command $graphifyPath -Arguments @() -Environment @{} -TimeoutSeconds 120
     Register-CodexMcp -Name 'headroom' -Command $headroomPath -Arguments @('mcp','serve') -Environment @{} -TimeoutSeconds 120
@@ -287,7 +352,9 @@ if (-not $SkipMcpRegistration) {
 
 Write-Host '6/7 Verifying local configuration and fresh MCP discovery'
 if (-not $DryRun -and -not $SkipMcpRegistration) {
-    Invoke-Checked (Resolve-Tool 'pwsh') @('-NoProfile','-File',(Join-Path $origin 'scripts\validate.ps1'),'-Probe')
+    $validationArguments = @('-NoProfile','-File',(Join-Path $origin 'scripts\validate.ps1'),'-Probe')
+    if (-not $SkipAntigravitySafety) { $validationArguments += '-StrictSecurity' }
+    Invoke-Checked (Resolve-Tool 'pwsh') $validationArguments
 } else {
     Write-Host '[dry-run/skip] runtime probes were not executed'
 }
@@ -301,5 +368,6 @@ $jevKeyPresent = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironment
     peerBridge = $peerPath
     headroomProxyHealthy = if($SkipHeadroomProxy -or $DryRun){'not_tested'}else{Test-HeadroomHealth}
     jevCredentialPresent = $jevKeyPresent
+    antigravitySafetyEnforced = -not ($DryRun -or $SkipAntigravitySafety)
     restartRequired = -not $DryRun
 } | ConvertTo-Json -Compress

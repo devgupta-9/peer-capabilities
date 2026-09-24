@@ -32,3 +32,17 @@ test('Antigravity mismatches, unknown models, and unsupported effort are rejecte
 test('invalid catalogs fail closed', () => {
   assert.throws(() => parseCodexCatalog({ models: [{ slug: 'incomplete' }] }));
 });
+
+test('Codex exclusions can be changed through portable policy configuration', () => {
+  const custom = {
+    codex: {
+      excludedNameTokens: [],
+      excludedDescriptionPhrases: [],
+      internalNameSubstrings: [],
+    },
+  };
+  const configured = parseCodexCatalog({ models: [
+    { slug: 'gpt-5.6-luna', description: 'Locally approved', supported_reasoning_levels: [{ effort: 'high' }] },
+  ] }, custom);
+  assert.equal(configured[0].allowed, true);
+});

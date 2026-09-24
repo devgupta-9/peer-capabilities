@@ -20,3 +20,18 @@ test('depth guard rejects recursive delegation before execution', async () => {
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /depth limit/);
 });
+
+test('invalid recursion depth fails closed', async () => {
+  const result = await callBridge('delegate_peer', {
+    caller: 'codex', task: 'No work', model: 'irrelevant', effort: 'high', selectionReason: 'Invalid depth guard verification',
+  }, { env: { PEER_AGENTS_DEPTH: 'not-a-number' } });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /depth limit/);
+});
+
+test('invalid task limit configuration falls back safely', async () => {
+  const result = await callBridge('tools/list', {}, {
+    env: { PEER_AGENTS_MAX_TASK_CHARS: 'not-a-number' },
+  });
+  assert.ok(result.tools.some((tool) => tool.name === 'delegate_peer'));
+});

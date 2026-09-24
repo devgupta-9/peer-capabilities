@@ -1,6 +1,6 @@
 # peer-agents
 
-Local MCP bridge for Codex <-> Antigravity CLI. Version 0.2.0.
+Local MCP bridge for Codex <-> Antigravity CLI. Version 0.3.0.
 
 ## Contract
 
@@ -30,11 +30,13 @@ Reverse direction uses caller=antigravity and an allowed exact Codex model/effor
 
 ## Safety and limitations
 
-Depth is capped at one through PEER_AGENTS_DEPTH; prompts also forbid further delegation. READ_ONLY and REVIEW prohibit file changes. Codex uses its read-only sandbox. Antigravity requests plan mode, sandbox, and normal CLI permission enforcement, with slash expansion disabled for read-only work. The installed agy CLI warns that plan mode has no effect with slash expansion disabled: do not treat plan mode as an enforced read-only boundary. Normal permissions and explicit no-write instructions still apply. The bridge does not bypass approval prompts. Permission denial is a real limitation to report.
+Depth is capped at one through PEER_AGENTS_DEPTH; delegated Codex sessions also disable their own peer-agents MCP, invalid depth values fail closed, and prompts forbid further delegation. Every delegated directory must be a Git repository inside PEER_AGENTS_ALLOWED_ROOTS, or inside the repository that launched the MCP server when no roots are configured.
+
+READ_ONLY and REVIEW prohibit file changes. Codex uses its read-only sandbox. Antigravity requests plan mode, sandbox, and normal CLI permission enforcement, with slash expansion disabled for read-only work. The installed agy CLI warns that plan mode has no effect with slash expansion disabled: do not treat plan mode as an enforced read-only boundary. Normal permissions and explicit no-write instructions still apply. The bridge does not bypass approval prompts. Permission denial is a real limitation to report.
 
 Git status before/after is a supplementary change detector, not a filesystem security boundary. It cannot detect all changes to already-dirty files or non-Git directories. The lead must verify work and must not automatically revert unknown changes.
 
-IMPLEMENT requires a clean Git repository and creates an isolated temporary worktree. The bridge exports a patch under ~/.peer-agents/runs and never applies it automatically. The lead reviews and tests integration. Do not ask the bridge to edit global configuration through IMPLEMENT.
+IMPLEMENT requires a clean Git repository and creates an isolated temporary worktree. The bridge writes Git's binary patch directly under ~/.peer-agents/runs, verifies it with git apply --check, records its SHA-256 hash, and only then removes the worktree. Any export or verification failure preserves the worktree and partial patch. The bridge never applies the patch automatically. The lead reviews and tests integration. Do not ask the bridge to edit global configuration through IMPLEMENT.
 
 Child CLIs inherit the bridge environment for existing CLI authentication; never put credentials in prompts. No installation, authentication, deployment, push, merge, or production mutation is performed by the bridge itself.
 
@@ -50,7 +52,8 @@ npm run build
 npm test
 ```
 
-Optional binary overrides: PEER_CODEX_BIN and PEER_AGY_BIN.
+Binary overrides: PEER_CODEX_BIN and PEER_AGY_BIN. The installer supplies absolute executable paths for both. PEER_CODEX_BIN must name a native executable, not a PowerShell or cmd shim.
+Optional policy overrides: PEER_AGENTS_ALLOWED_ROOTS and PEER_AGENTS_POLICY_FILE. The default model exclusion policy is peer-agents/policy.json.
 Codex discovery reads models_cache.json from CODEX_HOME when configured, otherwise ~/.codex. Missing or invalid catalogs fail closed; refresh model discovery through Codex before delegating.
 Antigravity discovery runs agy models for fresh selections.
 
@@ -66,6 +69,10 @@ command = "node"
 args = ["C:\\Users\\you\\.ai-rules\\peer-agents\\dist\\index.js"]
 enabled = true
 tool_timeout_sec = 1860
+
+[mcp_servers.peer-agents.env]
+PEER_CODEX_BIN = "C:\\path\\to\\codex.exe"
+PEER_AGY_BIN = "C:\\path\\to\\agy.exe"
 ```
 
 Existing Antigravity CLI registration is ~/.gemini/config/mcp_config.json:
@@ -75,13 +82,17 @@ Existing Antigravity CLI registration is ~/.gemini/config/mcp_config.json:
   "mcpServers": {
     "peer-agents": {
       "command": "node",
-      "args": ["C:\\Users\\you\\.ai-rules\\peer-agents\\dist\\index.js"]
+      "args": ["C:\\Users\\you\\.ai-rules\\peer-agents\\dist\\index.js"],
+      "env": {
+        "PEER_CODEX_BIN": "C:\\path\\to\\codex.exe",
+        "PEER_AGY_BIN": "C:\\path\\to\\agy.exe"
+      }
     }
   }
 }
 ```
 
-Rebuild, then reconnect/restart each host's peer-agents MCP after upgrading. Confirm peer_capabilities reports 0.2.0 and delegate_peer exposes model, effort, selectionReason with no tier input. Already-running servers retain their old code/schema. Old callers fail validation instead of receiving an implicit model.
+Rebuild, then reconnect/restart each host's peer-agents MCP after upgrading. Confirm peer_capabilities reports 0.3.0, both CLIs are available, and delegate_peer exposes model, effort, selectionReason with no tier input. Already-running servers retain their old code/schema. Old callers fail validation instead of receiving an implicit model.
 
 This migration intentionally breaks the old tier-based delegate_peer contract. Old tier-specific model environment variables are no longer used.
 

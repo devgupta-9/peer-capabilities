@@ -36,6 +36,31 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
+      - name: Validate scripts and dependency locks
+        shell: pwsh
+        run: |
+          python -m py_compile scripts/validate.py
+          node --check scripts/probe.mjs
+          foreach ($lock in @('tools/graphify/requirements.lock','tools/headroom/requirements.lock')) {
+            $content = Get-Content -LiteralPath $lock -Raw
+            if ($content -notmatch '--hash=sha256:') { throw "$lock does not contain dependency hashes" }
+            $requirements = Get-Content -LiteralPath $lock | Where-Object {
+              $_ -and -not $_.StartsWith('#') -and -not $_.StartsWith(' ') -and -not $_.StartsWith('-')
+            }
+            if (-not $requirements -or ($requirements | Where-Object { $_ -notmatch '==' })) {
+              throw "$lock contains an unpinned requirement"
+            }
+          }
+          if ((Get-Content bootstrap.ps1 -Raw) -notmatch '\$release = ''v0\.3\.0''') {
+            throw 'bootstrap.ps1 is not pinned to v0.3.0'
+          }
+          $readme = Get-Content README.md -Raw
+          $section = [regex]::Match($readme,'(?s)<summary>All 100 curated skill names</summary>(.*?)</details>').Groups[1].Value
+          $listed = @([regex]::Matches($section,'`([^`]+)`') | ForEach-Object { $_.Groups[1].Value })
+          $expected = @((Get-Content skills-manifest.json -Raw | ConvertFrom-Json -AsHashtable).skills | ForEach-Object { $_.name })
+          if ($listed.Count -ne $expected.Count -or @($expected | Where-Object { $_ -notin $listed }).Count) {
+            throw 'README skill inventory does not match skills-manifest.json'
+          }
       - name: Test synchronization safety
         shell: pwsh
         run: ./scripts/test-sync.ps1

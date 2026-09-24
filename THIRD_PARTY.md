@@ -10,6 +10,6 @@ This repository installs but does not relicense:
 | MCP TypeScript SDK | package lock | https://www.npmjs.com/package/@modelcontextprotocol/server |
 | Zod | package lock | https://www.npmjs.com/package/zod |
 
-Their packages, notices, and licenses remain governed by their upstream projects. `npm ci` and `uv tool install` retrieve pinned dependencies during installation.
+Their packages, notices, and licenses remain governed by their upstream projects. `npm ci` uses committed package locks. Graphify and Headroom use committed `requirements.lock` files containing exact transitive versions and package hashes; `uv tool install --with-requirements` verifies those supplied hashes during installation.
 
 The third-party skill bodies present on the maintainer's workstation are excluded from this public repository. `skills-manifest.json` is provenance metadata only.

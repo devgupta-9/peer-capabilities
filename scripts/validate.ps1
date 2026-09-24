@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$Probe)
+param([switch]$Probe, [switch]$StrictSecurity)
 $ErrorActionPreference = 'Stop'
 $origin = Split-Path -Parent $PSScriptRoot
 $uv = Get-Command uv -ErrorAction Stop
@@ -9,5 +9,6 @@ $python = Join-Path $toolRoot 'headroom-ai\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $python)) { throw 'Installed Headroom Python is unavailable. Run install.ps1; nothing will be auto-installed by validation.' }
 $arguments = @((Join-Path $PSScriptRoot 'validate.py'))
 if ($Probe) { $arguments += '--probe' }
+if ($StrictSecurity) { $arguments += '--strict-security' }
 & $python @arguments
 exit $LASTEXITCODE

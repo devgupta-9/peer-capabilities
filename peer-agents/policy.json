@@ -1,0 +1,20 @@
+{
+  "codex": {
+    "excludedNameTokens": [
+      "mini",
+      "nano",
+      "spark",
+      "luna",
+      "reserve"
+    ],
+    "excludedDescriptionPhrases": [
+      "fast and affordable",
+      "lightweight",
+      "cost-optimized",
+      "cost optimized"
+    ],
+    "internalNameSubstrings": [
+      "auto-review"
+    ]
+  }
+}

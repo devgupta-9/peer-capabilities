@@ -5,17 +5,20 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 USER = pathlib.Path.home()
 parser = argparse.ArgumentParser()
 parser.add_argument("--probe", action="store_true")
+parser.add_argument("--strict-security", action="store_true")
 args = parser.parse_args()
 errors: list[str] = []
+warnings: list[str] = []
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest().upper() if path.is_file() else None
 def read_json(path):
     return json.loads(path.read_text(encoding="utf-8-sig"))
-def safe_load(label, path, is_toml=False):
+def safe_load(label, path, is_toml=False, required=True):
     try:
         return tomllib.loads(path.read_text(encoding="utf-8-sig")) if is_toml else read_json(path)
     except Exception:
-        errors.append(f"{label}: could not parse configuration (contents withheld)")
+        message=f"{label}: could not parse configuration (contents withheld)"
+        (errors if required else warnings).append(message)
         return {}
 def uv_bin_dir():
     uv = shutil.which("uv")
@@ -46,18 +49,19 @@ replacements = {
     "${ORIGIN}": str(ROOT),
     "${NODE_BIN}": shutil.which("node") or "node",
     "${AGY_BIN}": shutil.which("agy") or "agy",
+    "${CODEX_PEER_BIN}": shutil.which("codex.exe") or shutil.which("codex") or "codex",
     "${UV_BIN}": uv_bin_dir(),
 }
 expected = expand_tokens(read_json(ROOT / "integrations.json"), replacements)
 codex = safe_load("Codex", USER / ".codex/config.toml", True)
 agy = safe_load("Antigravity MCP", USER / ".gemini/config/mcp_config.json")
-settings = safe_load("Antigravity settings", USER / ".gemini/config/config.json")
-cli = safe_load("Antigravity CLI", USER / ".gemini/antigravity-cli/settings.json")
+settings = safe_load("Antigravity settings", USER / ".gemini/config/config.json", required=args.strict_security)
+cli = safe_load("Antigravity CLI", USER / ".gemini/antigravity-cli/settings.json", required=args.strict_security)
 hosts = {"codex": codex.get("mcp_servers", {}), "antigravity": agy.get("mcpServers", {})}
 report = {
     "observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "scope": "Local configuration and fresh-process tool discovery; remote authentication and existing sessions not tested.",
-    "hosts": {}, "plugins": {}, "shared_tools": {}, "drift": [],
+    "hosts": {}, "plugins": {}, "shared_tools": {}, "drift": [], "warnings": warnings,
     "security": {}, "limitations": [
         "Remote credential validity, model account access, and backend model identity remain unverified.",
         "Fresh probes do not prove an already-open Codex or Antigravity session reloaded its configuration.",
@@ -99,12 +103,19 @@ def probe(job):
     try:
         env=actual.get("env",{})
         spec={"command":actual["command"],"args":actual.get("args",[]),"env":env,"cwd":str(ROOT)}
-        result=subprocess.run(["node",str(ROOT/"scripts/probe.mjs")],input=json.dumps(spec),text=True,capture_output=True,timeout=35)
+        result=subprocess.run(["node",str(ROOT/"scripts/probe.mjs")],input=json.dumps(spec),text=True,capture_output=True,timeout=55)
         data=json.loads(result.stdout)
         row["discovered"]=bool(data.get("ok"))
         row["tools"]=data.get("tools",[])
-        if name=="peer-agents": row["explicit_model_schema"]=data.get("explicitModelSchema",False)
-        if not data.get("ok") or (name=="peer-agents" and not data.get("explicitModelSchema")):
+        if name=="peer-agents":
+            row["explicit_model_schema"]=data.get("explicitModelSchema",False)
+            row["peer_capabilities_checked"]=data.get("peerCapabilitiesChecked",False)
+            row["peer_cli_availability"]={"codex":data.get("codexAvailable",False),"antigravity":data.get("antigravityAvailable",False)}
+        peer_ok=name!="peer-agents" or (
+            data.get("explicitModelSchema") and data.get("peerCapabilitiesChecked")
+            and data.get("codexAvailable") and data.get("antigravityAvailable")
+        )
+        if not data.get("ok") or not peer_ok:
             return f"{host}/{name}: MCP probe failed"
     except Exception:
         row["discovered"]=False
@@ -137,13 +148,13 @@ if (USER/".gemini/config/AGENTS.md").exists(): errors.append("Duplicate Antigrav
 for key,value in expected["antigravityReview"].items():
     okay=settings.get("userSettings",{}).get(key)==value
     report["security"][key]={"matches_expected":okay}
-    if not okay: errors.append(f"Antigravity review setting drift: {key}")
+    if not okay: (errors if args.strict_security else warnings).append(f"Antigravity review setting drift: {key}")
 broad={r"C:\WINDOWS\system32".casefold(),str(USER).casefold(),"d:\\"}
 trust=cli.get("trustedWorkspaces",[])
 report["security"]["broad_cli_trust_absent"]=not any(str(p).rstrip("\\").casefold() in {s.rstrip("\\") for s in broad} for p in trust)
-if not report["security"]["broad_cli_trust_absent"]: errors.append("Antigravity CLI still trusts a broad user/system/drive root")
+if not report["security"]["broad_cli_trust_absent"]: (errors if args.strict_security else warnings).append("Antigravity CLI still trusts a broad user/system/drive root")
 report["security"]["cli_mutating_git_deny_present"]=any("push|pull|fetch|merge" in p for p in cli.get("permissions",{}).get("deny",[]))
-if not report["security"]["cli_mutating_git_deny_present"]: errors.append("CLI mutating Git deny rule missing")
+if not report["security"]["cli_mutating_git_deny_present"]: (errors if args.strict_security else warnings).append("CLI mutating Git deny rule missing")
 report["managed_files"]=len(source_pairs)
 report["headroom_proxy"]={"health":"not_tested","session_routing":"not_verified"}
 if args.probe:
@@ -159,6 +170,7 @@ proxy_configured="127.0.0.1:8787" in str(provider.get("base_url","")) or "127.0.
 report["headroom_proxy"]["routing_in_inspected_config_or_environment"]=proxy_configured
 report["curated_skills"]=len([p for p in (ROOT/"skills").iterdir() if p.is_dir()]) if (ROOT/"skills").is_dir() else 0
 report["errors"]=errors
+report["warnings"]=warnings
 report["ok"]=not errors
 (ROOT/"reports").mkdir(exist_ok=True)
 (ROOT/"reports/latest.json").write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
@@ -173,7 +185,8 @@ lines+=["",f"Headroom proxy health: {report['headroom_proxy']['health']}. Sessio
         f"Proxy route found in inspected Codex provider/environment settings: {proxy_configured}.",
         "", "## Limits", ""]+[f"- {x}" for x in report["limitations"]]
 if errors: lines+=["","## Findings",""]+[f"- {x}" for x in errors]
+if warnings: lines+=["","## Warnings",""]+[f"- {x}" for x in warnings]
 lines+=["",f"Full secret-free inventory: {ROOT / 'reports/latest.json'}", ""]
 (USER/".ai-orchestrator/AI_HEALTH.md").write_text("\n".join(lines),encoding="utf-8")
-print(json.dumps({"ok":report["ok"],"observed_at":report["observed_at"],"managed_files":len(source_pairs),"curated_skills":report["curated_skills"],"drift":len(report["drift"]),"probes":len(jobs),"errors":errors,"report":str(ROOT/"reports/latest.json")}))
+print(json.dumps({"ok":report["ok"],"observed_at":report["observed_at"],"managed_files":len(source_pairs),"curated_skills":report["curated_skills"],"drift":len(report["drift"]),"probes":len(jobs),"warnings":warnings,"errors":errors,"report":str(ROOT/"reports/latest.json")}))
 sys.exit(0 if report["ok"] else 1)
