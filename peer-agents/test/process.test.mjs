@@ -35,3 +35,12 @@ test('process capture can send prompts through stdin', async () => {
   assert.equal(result.code, 0);
   assert.equal(result.stdout, 'prompt via stdin');
 });
+
+test('cancellation terminates an active child promptly', async () => {
+  const abort = new AbortController();
+  setTimeout(() => abort.abort(), 100);
+  const started = Date.now();
+  const result = await runCapture(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { signal: abort.signal, timeoutSeconds: 4 });
+  assert.equal(result.cancelled, true);
+  assert.ok(Date.now() - started < 3500);
+});

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export async function callBridge(tool, args = {}, options = {}) {
   const bridgeRoot = fileURLToPath(new URL('../', import.meta.url));
-  const child = spawn(process.execPath, [path.join(bridgeRoot, 'dist/index.js')], {
+  const child = spawn(process.execPath, [options.entry ?? path.join(bridgeRoot, 'dist/index.js'), ...(options.args ?? [])], {
     cwd: bridgeRoot, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, ...options.env },
   });

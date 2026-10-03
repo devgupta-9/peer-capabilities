@@ -153,7 +153,8 @@ broad={r"C:\WINDOWS\system32".casefold(),str(USER).casefold(),"d:\\"}
 trust=cli.get("trustedWorkspaces",[])
 report["security"]["broad_cli_trust_absent"]=not any(str(p).rstrip("\\").casefold() in {s.rstrip("\\") for s in broad} for p in trust)
 if not report["security"]["broad_cli_trust_absent"]: (errors if args.strict_security else warnings).append("Antigravity CLI still trusts a broad user/system/drive root")
-report["security"]["cli_mutating_git_deny_present"]=any("push|pull|fetch|merge" in p for p in cli.get("permissions",{}).get("deny",[]))
+required_deny=r'command(regex:\bgit(?:\.exe)?\s+.*\b(push|pull|fetch|merge|rebase|checkout|switch|reset|restore|stash|clean|commit|add|rm|mv)\b.*)'
+report["security"]["cli_mutating_git_deny_present"]=required_deny in cli.get("permissions",{}).get("deny",[])
 if not report["security"]["cli_mutating_git_deny_present"]: (errors if args.strict_security else warnings).append("CLI mutating Git deny rule missing")
 report["managed_files"]=len(source_pairs)
 report["headroom_proxy"]={"health":"not_tested","session_routing":"not_verified"}

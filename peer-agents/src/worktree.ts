@@ -15,6 +15,7 @@ export type ImplementationPatch = {
 };
 
 export async function finalizeImplementationWorktree(input: {
+  baseSha?: string;
   root: string;
   worktree: string;
   runId: string;
@@ -26,6 +27,8 @@ export async function finalizeImplementationWorktree(input: {
   const temporaryPatchPath = `${patchPath}.partial`;
 
   try {
+    const base = input.baseSha ?? (await runCapture('git', ['-C', input.root, 'rev-parse', 'HEAD'])).stdout.trim();
+    if (!/^[a-f0-9]{40,64}$/i.test(base)) throw new Error('Invalid original base SHA');
     const add = await runCapture('git', ['-C', input.worktree, 'add', '-A'], { timeoutSeconds: 30 });
     if (add.code !== 0) {
       throw new Error(`Failed to stage delegated changes: ${add.stderr || add.stdout}`);
@@ -37,7 +40,7 @@ export async function finalizeImplementationWorktree(input: {
       'git',
       [
         '-C', input.worktree,
-        'diff', '--cached', '--binary', '--no-color', '--full-index',
+        'diff', '--cached', '--binary', '--no-color', '--full-index', base,
         `--output=${temporaryPatchPath}`,
       ],
       { timeoutSeconds: 60 },
@@ -83,6 +86,10 @@ export async function finalizeImplementationWorktree(input: {
 }
 
 async function removeWorktree(root: string, worktree: string): Promise<string | undefined> {
+  const ignored = await runCapture('git', ['-C', worktree, 'ls-files', '--others', '--ignored', '--exclude-standard']);
+  if (ignored.code !== 0 || ignored.stdout.trim() || ignored.stdoutTruncated) {
+    return 'Worktree preserved: ignored or unverified artifacts require reconciliation.';
+  }
   const remove = await runCapture('git', ['-C', root, 'worktree', 'remove', '--force', worktree], {
     timeoutSeconds: 60,
   });
@@ -90,11 +97,7 @@ async function removeWorktree(root: string, worktree: string): Promise<string | 
     return `Verified patch was saved, but temporary worktree cleanup failed; inspect ${worktree}. ${remove.stderr || remove.stdout}`;
   }
   if (existsSync(worktree)) {
-    try {
-      await rm(worktree, { recursive: true, force: true });
-    } catch {
-      return `Git detached the worktree, but the temporary directory remains at ${worktree}.`;
-    }
+    return `Git detached the worktree, but the temporary directory remains at ${worktree}.`;
   }
   return undefined;
 }

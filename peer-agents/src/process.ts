@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { childEnvironment } from './security.js';
 
 export type CaptureResult = {
   code: number | null;
@@ -7,6 +8,7 @@ export type CaptureResult = {
   stdoutTruncated: boolean;
   stderrTruncated: boolean;
   timedOut: boolean;
+  cancelled: boolean;
   durationMs: number;
 };
 
@@ -36,7 +38,7 @@ function killProcessTree(child: ReturnType<typeof spawn>) {
       });
       killer.unref();
     } else {
-      child.kill('SIGKILL');
+      process.kill(-child.pid, 'SIGKILL');
     }
   } catch {
     try {
@@ -77,6 +79,7 @@ export async function runCapture(
     env?: NodeJS.ProcessEnv;
     input?: string | Buffer;
     maxOutputBytes?: number;
+    signal?: AbortSignal;
   } = {},
 ): Promise<CaptureResult> {
   const started = Date.now();
@@ -97,22 +100,29 @@ export async function runCapture(
     let stdoutTruncated = false;
     let stderrTruncated = false;
     let timedOut = false;
+    let cancelled = false;
     let settled = false;
 
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: options.env ?? process.env,
+      env: options.env ?? childEnvironment(),
       shell: false,
+      detached: process.platform !== 'win32',
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    // A CLI may reject input and close stdin before the complete prompt is sent.
+    child.stdin?.on('error', () => { /* completion/error is reported by the child */ });
     child.stdin?.end(options.input);
 
     const timer = setTimeout(() => {
       timedOut = true;
       killProcessTree(child);
     }, timeoutSeconds * 1000);
+    const abort = () => { cancelled = true; killProcessTree(child); };
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
 
     child.stdout?.on('data', (chunk: Buffer) => {
       const captured = captureChunk(stdoutChunks, chunk, stdoutBytes, maxOutputBytes);
@@ -130,6 +140,7 @@ export async function runCapture(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
       reject(error);
     });
 
@@ -137,6 +148,7 @@ export async function runCapture(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
       resolve({
         code,
         stdout: decodeCaptured(stdoutChunks, stdoutTruncated, maxOutputBytes),
@@ -144,6 +156,7 @@ export async function runCapture(
         stdoutTruncated,
         stderrTruncated,
         timedOut,
+        cancelled,
         durationMs: Date.now() - started,
       });
     });

@@ -11,6 +11,7 @@ import { effortSchema, parseCodexCatalog, validateChoice, type ModelChoice } fro
 import { authorizeWorkingDirectory } from './path-policy.js';
 import { runCapture, truncate } from './process.js';
 import { finalizeImplementationWorktree, type ImplementationPatch } from './worktree.js';
+import { childEnvironment, redact } from './security.js';
 
 type AgentName = 'codex' | 'antigravity';
 type Mode = 'READ_ONLY' | 'REVIEW' | 'IMPLEMENT';
@@ -44,7 +45,7 @@ async function codexCatalog() {
 
 function toolText(payload: unknown, isError = false) {
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }],
+    content: [{ type: 'text' as const, text: redact(JSON.stringify(payload, null, 2)) }],
     ...(isError ? { isError: true } : {}),
   };
 }
@@ -155,6 +156,7 @@ function buildPrompt(args: {
 }
 
 async function prepareImplementationWorktree(cwd: string): Promise<{
+  baseSha: string;
   root: string;
   worktree: string;
   runId: string;
@@ -187,14 +189,17 @@ async function prepareImplementationWorktree(cwd: string): Promise<{
     await mkdir(path.dirname(worktree), { recursive: true });
   }
 
-  const add = await runCapture('git', ['-C', root, 'worktree', 'add', '--detach', worktree, 'HEAD'], {
+  const base = await runCapture('git', ['-C', root, 'rev-parse', 'HEAD'], { timeoutSeconds: 15 });
+  if (base.code !== 0) throw new Error('Cannot resolve original worktree base');
+  const baseSha = base.stdout.trim();
+  const add = await runCapture('git', ['-C', root, 'worktree', 'add', '--detach', worktree, baseSha], {
     timeoutSeconds: 60,
   });
   if (add.code !== 0) {
     throw new Error(`Failed to create isolated worktree: ${add.stderr || add.stdout}`);
   }
 
-  return { root, worktree, runId };
+  return { root, worktree, runId, baseSha };
 }
 
 async function runCodex(input: {
@@ -223,7 +228,7 @@ async function runCodex(input: {
   args.push('-');
 
   const env = {
-    ...process.env,
+    ...childEnvironment(process.env, 'codex'),
     PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1),
     PEER_AGENTS_ALLOWED_ROOTS: input.cwd,
   };
@@ -285,7 +290,7 @@ async function runAntigravity(input: {
   if (choice.model) args.push('--model', choice.model);
 
   const env = {
-    ...process.env,
+    ...childEnvironment(process.env, 'antigravity'),
     PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1),
     PEER_AGENTS_ALLOWED_ROOTS: input.cwd,
   };

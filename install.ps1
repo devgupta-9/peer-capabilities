@@ -210,9 +210,9 @@ function Set-AntigravitySafetySettings {
     if (-not $cli.ContainsKey('permissions') -or $cli.permissions -isnot [hashtable]) {
         $cli.permissions = @{}
     }
-    $denyRule = 'command(regex:git (push|pull|fetch|merge|rebase|checkout|switch|reset|restore|stash|clean|commit|add|rm|mv).*)'
-    $deny = @($cli.permissions.deny | Where-Object { $_ -is [string] })
-    if (-not ($deny | Where-Object { $_ -match 'push\|pull\|fetch\|merge' })) {
+    $denyRule = 'command(regex:\bgit(?:\.exe)?\s+.*\b(push|pull|fetch|merge|rebase|checkout|switch|reset|restore|stash|clean|commit|add|rm|mv)\b.*)'
+    $deny = @($cli.permissions['deny'] | Where-Object { $_ -is [string] })
+    if ($denyRule -notin $deny) {
         $deny += $denyRule
     }
     $cli.permissions.deny = $deny
@@ -222,7 +222,7 @@ function Set-AntigravitySafetySettings {
         $userRoot.TrimEnd('\').ToLowerInvariant(),
         'd:'
     )
-    $cli.trustedWorkspaces = @($cli.trustedWorkspaces | Where-Object {
+    $cli.trustedWorkspaces = @($cli['trustedWorkspaces'] | Where-Object {
         $_ -is [string] -and $_.TrimEnd('\').ToLowerInvariant() -notin $broadTrust
     })
     Write-JsonHashtable $cliPath $cli
@@ -273,8 +273,8 @@ $codexPeerPath = Resolve-NativeCodexExecutable
 $agyPath = Resolve-Tool 'agy'
 
 $nodeVersion = (& $nodePath --version).TrimStart('v')
-if ($LASTEXITCODE -ne 0 -or [int]($nodeVersion.Split('.')[0]) -lt 20) {
-    throw "Node.js 20 or newer is required; found $nodeVersion"
+if ($LASTEXITCODE -ne 0 -or [int]($nodeVersion.Split('.')[0]) -lt 24) {
+    throw "Node.js 24 or newer is required; found $nodeVersion"
 }
 
 Write-Host '1/7 Auditing publishable sources'

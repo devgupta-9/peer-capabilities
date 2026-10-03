@@ -83,3 +83,21 @@ test('IMPLEMENT preserves delegated work when patch verification fails', async (
     await rm(f.fixture, { recursive: true, force: true });
   }
 });
+
+test('IMPLEMENT includes delegate commits relative to the original base', async () => {
+  const f = await repositoryFixture();
+  try {
+    const baseSha = git(f.root, 'rev-parse', 'HEAD').trim();
+    await writeFile(path.join(f.worktree, 'large.txt'), 'committed by delegate\n');
+    git(f.worktree, 'add', '-A');
+    git(f.worktree, 'commit', '-m', 'delegate commit');
+    const result = await finalizeImplementationWorktree({
+      ...f, runId: 'committed', target: 'codex', runDirectory: f.runs, baseSha,
+    });
+    assert.ok(result.patchPath, 'a delegate commit must not be mistaken for no changes');
+    git(f.root, 'apply', result.patchPath);
+    assert.match(await readFile(path.join(f.root, 'large.txt'), 'utf8'), /committed by delegate/);
+  } finally {
+    await rm(f.fixture, { recursive: true, force: true });
+  }
+});
