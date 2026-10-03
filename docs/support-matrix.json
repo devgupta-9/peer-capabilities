@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "maturity": "development",
+  "minimumNode": 24,
+  "locallyTested": {
+    "platform": "win32",
+    "nodeMajor": 24
+  },
+  "adapters": [
+    {
+      "id": "codex",
+      "architecturallySupported": true,
+      "implemented": true,
+      "platformCertified": [],
+      "releaseSupported": []
+    },
+    {
+      "id": "antigravity",
+      "architecturallySupported": true,
+      "implemented": true,
+      "platformCertified": [],
+      "releaseSupported": []
+    },
+    {
+      "id": "claude-code",
+      "architecturallySupported": true,
+      "implemented": false,
+      "platformCertified": [],
+      "releaseSupported": []
+    },
+    {
+      "id": "grok",
+      "architecturallySupported": true,
+      "implemented": false,
+      "platformCertified": [],
+      "releaseSupported": []
+    },
+    {
+      "id": "gemini-cli",
+      "architecturallySupported": true,
+      "implemented": false,
+      "platformCertified": [],
+      "releaseSupported": []
+    },
+    {
+      "id": "opencode",
+      "architecturallySupported": true,
+      "implemented": false,
+      "platformCertified": [],
+      "releaseSupported": []
+    }
+  ],
+  "thirdAdapter": "deterministic test-only profiles; not a real provider",
+  "publicRelease": false
+}

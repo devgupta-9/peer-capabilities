@@ -8,6 +8,29 @@ permissions:
   contents: read
 
 jobs:
+  portable-core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: peer-agents/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: peer-agents
+      - run: npm run typecheck
+        working-directory: peer-agents
+      - run: npm run build
+        working-directory: peer-agents
+      - run: npm test
+        working-directory: peer-agents
+      - run: npm pack --dry-run --json
+        working-directory: peer-agents
   windows:
     runs-on: windows-latest
     steps:

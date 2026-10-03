@@ -2,6 +2,19 @@
 
 Versioned Windows setup for a shared Codex and Antigravity engineering environment. It installs repository-owned policy, the peer bridge, local MCP registrations, validation, and synchronization without publishing credentials.
 
+## Phase-1 development
+
+The portable governance runtime is under development, separate from the released
+v0.3.0 installer below. Start with the [original brief](docs/product/phase-1-brief.md),
+[accepted architecture](docs/architecture/phase-1-plan.md), [ADRs](docs/decisions/README.md),
+and [implementation evidence and remaining gates](docs/architecture/implementation-status.md).
+The development runtime requires **Node 24+**. No platform combination is yet
+release-certified, and the npm package remains private/unpublished.
+
+From `peer-agents`: `npm ci --ignore-scripts`, `npm run build`, then
+`node bin/peer-capabilities.mjs --help`. See the [runtime guide](docs/runtime-guide.md).
+The managed-file setup engine does not yet replace the legacy tool installer.
+
 ## One-command install
 
 Run the pinned `v0.3.0` release in PowerShell 7:
@@ -20,7 +33,7 @@ git -C "$env:USERPROFILE\.ai-rules" show --stat --oneline HEAD
 & "$env:USERPROFILE\.ai-rules\install.ps1"
 ```
 
-Requirements: Windows, PowerShell 7, Git, Node.js 20+, npm, uv, Codex CLI, and Antigravity CLI (`agy`). Authentication remains interactive and is never stored by this repository.
+Historical v0.3.0 requirements: Windows, PowerShell 7, Git, Node.js 20+, npm, uv, Codex CLI, and Antigravity CLI (`agy`). The development checkout requires Node 24+. Authentication remains provider-owned and interactive.
 
 ## Inventory and ownership
 

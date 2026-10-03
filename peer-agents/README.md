@@ -2,6 +2,11 @@
 
 Local MCP bridge for Codex <-> Antigravity CLI. Version 0.3.0.
 
+The unchanged legacy MCP contract coexists with an experimental Phase-1 task runtime
+(`node bin/peer-capabilities.mjs --help`). The runtime reports 0.4.0-dev.0, is not
+published or certified, and requires Node 24+. See ../docs/runtime-guide.md and
+../docs/architecture/implementation-status.md before using live adapters.
+
 ## Contract
 
 - peer_capabilities discovers CLI versions, Antigravity models, and the local Codex model catalog with supported efforts and restrictions. It does not spend a model turn. A cached Codex catalog does not prove current account access.
@@ -38,11 +43,17 @@ Git status before/after is a supplementary change detector, not a filesystem sec
 
 IMPLEMENT requires a clean Git repository and creates an isolated temporary worktree. The bridge writes Git's binary patch directly under ~/.peer-agents/runs, verifies it with git apply --check, records its SHA-256 hash, and only then removes the worktree. Any export or verification failure preserves the worktree and partial patch. The bridge never applies the patch automatically. The lead reviews and tests integration. Do not ask the bridge to edit global configuration through IMPLEMENT.
 
-Child CLIs inherit the bridge environment for existing CLI authentication; never put credentials in prompts. No installation, authentication, deployment, push, merge, or production mutation is performed by the bridge itself.
+Child CLIs receive an allowlisted system environment and provider configuration
+location, not unrelated environment secrets. Provider-owned login stores remain
+in place. Ambient API-key authentication is not implicitly forwarded. Responses
+and diagnostics are sanitized; never put credentials in prompts. The bridge itself
+does not install, authenticate, publish or integrate delegated work.
 
 ## Install and verify
 
-Requirements: Node.js 20+, Git, installed/authenticated Codex and agy CLIs. Tested locally with Codex 0.154.0 and agy 1.2.4.
+Requirements: Node.js 24+, Git and the selected provider CLI. The legacy v0.3.0
+bridge was tested locally with Codex 0.154.0 and agy 1.2.4; that is not certification
+of the new runtime or a requirement to install two agents.
 
 ```powershell
 Set-Location "$env:USERPROFILE\.ai-rules\peer-agents"
