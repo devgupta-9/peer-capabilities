@@ -1,13 +1,16 @@
 {
-  "name": "peer-agents",
-  "version": "0.3.0",
+  "name": "@devgupta/peer-capabilities",
+  "version": "0.4.0-dev.0",
   "private": true,
+  "bin": { "peer-capabilities": "bin/peer-capabilities.mjs" },
+  "files": ["bin/", "dist/", "policy.json", "examples/", "README.md"],
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "cli": "node bin/peer-capabilities.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.mjs",
     "start": "node dist/index.js",

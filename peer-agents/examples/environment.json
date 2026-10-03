@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "id": "local-policy",
+      "kind": "engineering-policy",
+      "optional": false,
+      "recipe": "managed-file",
+      "version": "1.0.0",
+      "destination": "peer-policy.md",
+      "content": "Peer Capabilities managed policy example. Source evidence outranks remembered context. No publication or destructive action without explicit authorization.\n",
+      "integrity": "sha256:2c39649dcf466915bdd2b6dbbb0044aaad1c14804c3e3d6b12e711c3e1ba7f29"
+    },
+    {
+      "id": "codex",
+      "kind": "agent",
+      "optional": true,
+      "recipe": "observe",
+      "version": "discovered",
+      "config": {}
+    },
+    {
+      "id": "antigravity",
+      "kind": "agent",
+      "optional": true,
+      "recipe": "observe",
+      "version": "discovered",
+      "config": {}
+    },
+    {
+      "id": "graphify",
+      "kind": "integration",
+      "optional": true,
+      "recipe": "observe",
+      "version": "discovered",
+      "config": {}
+    },
+    {
+      "id": "headroom",
+      "kind": "integration",
+      "optional": true,
+      "recipe": "observe",
+      "version": "discovered",
+      "config": {}
+    },
+    {
+      "id": "jev",
+      "kind": "integration",
+      "optional": true,
+      "recipe": "observe",
+      "version": "discovered",
+      "config": {}
+    }
+  ]
+}

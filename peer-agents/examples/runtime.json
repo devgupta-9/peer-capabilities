@@ -1,0 +1,30 @@
+{
+  "agents": [
+    {
+      "id": "codex",
+      "experimental": false,
+      "profiles": []
+    },
+    {
+      "id": "antigravity",
+      "experimental": false,
+      "profiles": []
+    }
+  ],
+  "policy": {
+    "policyVersion": "local-v1",
+    "manifestDigest": "set-to-your-validated-manifest-digest",
+    "mode": "STANDARD",
+    "competence": 8,
+    "complexity": "high",
+    "testCommand": [
+      "node",
+      "--test"
+    ],
+    "optionalIntegrations": {
+      "graphify": false,
+      "headroom": false,
+      "jev": false
+    }
+  }
+}
