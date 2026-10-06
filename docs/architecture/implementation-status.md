@@ -1,5 +1,10 @@
 # Implementation ledger
 
+Current hardening slice: [Phase 0 foundation hardening](phase-0-hardening.md).
+The dated verification below is historical, not a claim that the current HEAD's
+three-platform CI passed. The next approved slice after Phase 0 is Identity and
+Resource Contracts; the earlier next-slice recommendation below is superseded.
+
 Updated: 2026-10-03. Status: **unpublished development foundation; roadmap incomplete**.
 Plan: [accepted architecture](phase-1-plan.md). Baseline: `3bce3a4` / v0.3.0,
 with 19 passing bridge tests before development. Current package: `0.4.0-dev.0`,

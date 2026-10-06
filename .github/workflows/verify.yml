@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
   portable-core:
     strategy:
@@ -35,6 +39,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -42,9 +48,10 @@ jobs:
           cache-dependency-path: |
             peer-agents/package-lock.json
             tools/jev/package-lock.json
-      - name: Secret and portability gate
-        shell: pwsh
-        run: ./scripts/secret-scan.ps1
+      - name: Secret scan — current content
+        run: node scripts/secret-scan.mjs
+      - name: Secret scan — fetched reachable history
+        run: node scripts/secret-scan.mjs --history
       - name: Parse PowerShell
         shell: pwsh
         run: |
@@ -59,11 +66,13 @@ jobs:
             }
           }
           if ($failed) { exit 1 }
-      - name: Validate scripts and dependency locks
-        shell: pwsh
+      - name: Validate Python syntax
+        run: python -m py_compile scripts/validate.py
+      - name: Validate Node syntax
+        run: node --check scripts/probe.mjs
+      - name: Validate dependency locks and inventory
+        shell: pwsh -NoProfile -File scripts/ci-step.ps1 {0}
         run: |
-          python -m py_compile scripts/validate.py
-          node --check scripts/probe.mjs
           foreach ($lock in @('tools/graphify/requirements.lock','tools/headroom/requirements.lock')) {
             $content = Get-Content -LiteralPath $lock -Raw
             if ($content -notmatch '--hash=sha256:') { throw "$lock does not contain dependency hashes" }
@@ -87,18 +96,24 @@ jobs:
       - name: Test synchronization safety
         shell: pwsh
         run: ./scripts/test-sync.ps1
-      - name: Build and test peer bridge
+      - name: Install peer bridge
         working-directory: peer-agents
-        shell: pwsh
-        run: |
-          npm ci --ignore-scripts
-          npm run typecheck
-          npm run build
-          npm test
-          npm audit --omit=dev --audit-level=high
+        run: npm ci --ignore-scripts
+      - name: Typecheck peer bridge
+        working-directory: peer-agents
+        run: npm run typecheck
+      - name: Build peer bridge
+        working-directory: peer-agents
+        run: npm run build
+      - name: Test peer bridge
+        working-directory: peer-agents
+        run: npm test
+      - name: Audit peer bridge
+        working-directory: peer-agents
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install Jev runtime dependencies
+        working-directory: tools/jev
+        run: npm ci --omit=dev --ignore-scripts
       - name: Audit Jev runtime dependencies
         working-directory: tools/jev
-        shell: pwsh
-        run: |
-          npm ci --omit=dev --ignore-scripts
-          npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=high

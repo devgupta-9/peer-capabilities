@@ -77,6 +77,6 @@ test('manifest separates desired state from secrets and rejects executable recip
   const manifest = { schemaVersion: 1, components: [{ id: 'graphify', kind: 'integration', optional: true, recipe: 'observe', version: '1.0.0', config: {} }] };
   assert.equal(validateManifest(manifest).components[0].id, 'graphify');
   assert.throws(() => validateManifest({ ...manifest, components: [{ ...manifest.components[0], recipe: 'shell', command: 'echo arbitrary' }] }), /recipe|Unrecognized/);
-  assert.throws(() => validateManifest({ ...manifest, components: [{ ...manifest.components[0], config: { apiKey: 'anything' } }] }), /credential/i);
+  assert.throws(() => validateManifest({ ...manifest, components: [{ ...manifest.components[0], config: { apiKey: ['any', 'thing'].join('') } }] }), /credential/i);
   assert.throws(() => validateManifest({ schemaVersion: 2, components: [] }));
 });

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, symlink, rename } from 'node:fs/promises';
+import { directoryIdentity } from '../dist/filesystem-identity.js';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -36,7 +37,10 @@ test('delegation accepts only Git workspaces inside configured roots', async () 
       allowedRoots: [allowedParent],
       serverCwd: allowedRepo,
     });
-    assert.equal(accepted.gitRoot, allowedRepo);
+    assert.equal(directoryIdentity(accepted.gitRoot).key, directoryIdentity(allowedRepo).key);
+    const redirect = path.join(allowedParent, 'redirect');
+    await symlink(deniedRepo, redirect, process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(authorizeWorkingDirectory(redirect, { allowedRoots: [allowedParent] }), /outside configured/);
 
     await assert.rejects(
       authorizeWorkingDirectory(deniedRepo, { allowedRoots: [allowedParent], serverCwd: allowedRepo }),
@@ -46,6 +50,9 @@ test('delegation accepts only Git workspaces inside configured roots', async () 
       authorizeWorkingDirectory(nonRepo, { allowedRoots: [allowedParent], serverCwd: allowedRepo }),
       /Git repository/i,
     );
+    await rename(allowedParent, path.join(fixture, 'old-allowed'));
+    await symlink(path.join(fixture, 'denied'), allowedParent, process.platform === 'win32' ? 'junction' : 'dir');
+    await assert.rejects(authorizeWorkingDirectory(path.join(allowedParent, 'repo'), { allowedRoots: [allowedParent] }), /scope|identity/i);
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }

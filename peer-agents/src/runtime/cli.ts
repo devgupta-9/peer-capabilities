@@ -1,6 +1,5 @@
 import { parseArgs } from 'node:util';
 import { mkdir, readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
 import * as z from 'zod/v4';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
@@ -11,7 +10,7 @@ import { Runtime } from './runner.js';
 import { stateDirectory, repositoryRoot } from './repository.js';
 import { createTaskServer } from './host.js';
 import { assertNonSecret, redact } from '../security.js';
-import { digest } from './identity.js';
+import { defaultEnvironmentDirectory } from './environment-state.js';
 
 const configSchema = z.object({
   agents: z.array(adapterConfigSchema),
@@ -47,7 +46,7 @@ export async function main(argv: string[]): Promise<void> {
     if (!v.root) throw new Error('--root is required; no implicit home-directory installation');
     const root = path.resolve(v.root);
     await mkdir(root, { recursive: true });
-    const stateRoot = path.resolve(v['state-dir'] ?? path.join(homedir(), '.peer-capabilities', 'environments', digest(root)));
+    const stateRoot = path.resolve(v['state-dir'] ?? defaultEnvironmentDirectory(root));
     const manager = new EnvironmentManager(path.join(stateRoot, 'environment.sqlite'), root);
     try {
       if (command === 'uninstall') {
@@ -71,7 +70,7 @@ export async function main(argv: string[]): Promise<void> {
   const raw = await json(v.config); assertNonSecret(raw);
   const config = configSchema.parse(raw);
   const root = await repositoryRoot(path.resolve(v.repo));
-  const environmentPath = path.join(path.resolve(v['state-dir'] ?? path.join(homedir(), '.peer-capabilities', 'environments', digest(root))), 'environment.sqlite');
+  const environmentPath = path.join(path.resolve(v['state-dir'] ?? defaultEnvironmentDirectory(root)), 'environment.sqlite');
   const environment = new EnvironmentManager(environmentPath, root);
   const adapters = config.agents.map(c => new ProviderAdapter(c, environment.getObservation(c.id)));
   if (command === 'discover' || command === 'verify') {

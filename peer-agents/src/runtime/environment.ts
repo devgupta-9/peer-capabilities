@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile, mkdir, realpath, rename, unlink, writeFile } from 'node:fs/promises';
+import { lstat, readFile, mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { realpathSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
+import { directoryIdentity, assertIdentity, type DirectoryIdentity } from '../filesystem-identity.js';
 import { database, transaction } from './database.js';
 import { canonical, contentHash, digest } from './identity.js';
 import { validateManifest } from './manifest.js';
@@ -24,8 +25,26 @@ async function contents(file: string): Promise<string | null> {
 }
 export class EnvironmentManager {
   private db: DatabaseSync;
+  private identity: DirectoryIdentity;
   constructor(file: string, private root: string) {
-    this.root = realpathSync(root);
+    this.identity = directoryIdentity(root);
+    this.root = this.identity.canonicalPath;
+    // Inspect existing scope without writes: detection is not a migration.
+    if (existsSync(file)) {
+      if (lstatSync(file).isSymbolicLink()) throw new Error('Redirected environment database scope');
+      const existing = new DatabaseSync(file, { readOnly: true });
+      try {
+        const hasScope = existing.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='environment_scope'").get();
+        if (hasScope) {
+          const scope = existing.prepare('SELECT root FROM environment_scope WHERE id=1').get();
+          const hasIdentity = existing.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='environment_identity'").get();
+          const pin = hasIdentity && existing.prepare('SELECT identity FROM environment_identity WHERE id=1').get();
+          if (!scope || scope.root !== this.root || !pin || pin.identity !== this.identity.key) {
+            throw new Error('Legacy or changed environment scope identity; explicit reconciliation required');
+          }
+        }
+      } finally { existing.close(); }
+    }
     this.db = database(file, 'environment');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS ownership(id TEXT PRIMARY KEY, destination TEXT UNIQUE NOT NULL, body TEXT NOT NULL) STRICT;
@@ -33,15 +52,21 @@ export class EnvironmentManager {
       CREATE TABLE IF NOT EXISTS observations(id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS locks(id INTEGER PRIMARY KEY CHECK(id=1), pid INTEGER NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS environment_scope(id INTEGER PRIMARY KEY CHECK(id=1), root TEXT NOT NULL) STRICT;
+      CREATE TABLE IF NOT EXISTS environment_identity(id INTEGER PRIMARY KEY CHECK(id=1), identity TEXT NOT NULL) STRICT;
     `);
     const scope = this.db.prepare('SELECT root FROM environment_scope WHERE id=1').get();
     if (scope && scope.root !== this.root) { this.db.close(); throw new Error('Environment scope mismatch; select its original root or a separate state directory'); }
+    const pinned = this.db.prepare('SELECT identity FROM environment_identity WHERE id=1').get();
+    if (scope && (!pinned || pinned.identity !== this.identity.key)) {
+      this.db.close(); throw new Error('Legacy or changed environment scope identity; explicit reconciliation required');
+    }
     this.db.prepare('INSERT OR IGNORE INTO environment_scope VALUES (1,?)').run(this.root);
+    this.db.prepare('INSERT OR IGNORE INTO environment_identity VALUES (1,?)').run(this.identity.key);
   }
   private async destination(relative: string): Promise<string> {
     if (path.isAbsolute(relative) || relative.split(/[\\/]/).some(x => x === '..' || x.includes(':'))) throw new Error('Path escape');
-    const root = await realpath(this.root);
-    if (root !== this.root || (await lstat(this.root)).isSymbolicLink()) throw new Error('Managed root scope changed');
+    assertIdentity(this.identity);
+    const root = this.identity.canonicalPath;
     let current = root;
     for (const piece of relative.split(/[\\/]/).filter(Boolean)) {
       current = path.join(current, piece);

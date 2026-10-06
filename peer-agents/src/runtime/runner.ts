@@ -5,7 +5,7 @@ import { redact } from '../security.js';
 import type { AgentAdapter, Choice, Mode, TaskState } from './contracts.js';
 import { contextPackage } from './context.js';
 import { digest } from './identity.js';
-import { exportPatch, fingerprint, integratePatch, prepareWorktree, repositoryRoot } from './repository.js';
+import { exportPatch, fingerprint, integratePatch, prepareWorktree, repositoryRoot, repositoryIdentity } from './repository.js';
 import { selectAgent } from './scheduler.js';
 import { TaskStore } from './store.js';
 import { ApprovalVerifier } from './approval.js';
@@ -37,7 +37,7 @@ export class Runtime {
   }
   private async leased<T>(state: TaskState, action: () => Promise<T>): Promise<T> {
     const owner = randomUUID();
-    const repoLease = 'repo:' + state.repository;
+    const repoLease = 'repo:' + (await repositoryIdentity(state.repository)).repositoryKey;
     this.store.acquire(repoLease, owner);
     try {
       this.store.acquire('task:' + state.id, owner);

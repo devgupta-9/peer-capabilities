@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { lstat, mkdir, readFile, readlink, realpath } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readlink } from 'node:fs/promises';
 import path from 'node:path';
 import { runCapture } from '../process.js';
 import { contentHash, digest } from './identity.js';
+import { directoryIdentity, childPath, containsDirectory } from '../filesystem-identity.js';
 
 async function git(root: string, args: string[], input?: Buffer, execute = runCapture) {
   const r = await execute('git', ['-C', root, ...args], { timeoutSeconds: 60, input });
@@ -11,22 +12,30 @@ async function git(root: string, args: string[], input?: Buffer, execute = runCa
   return r.stdout;
 }
 export async function repositoryRoot(directory: string): Promise<string> {
-  const root = await realpath((await git(directory, ['rev-parse', '--show-toplevel'])).trim());
-  if (root !== await realpath(directory)) throw new Error('Task directory must be the repository root');
-  return root;
+  const root = directoryIdentity((await git(directory, ['rev-parse', '--show-toplevel'])).trim());
+  if (root.key !== directoryIdentity(directory).key) throw new Error('Task directory must be the repository root');
+  return root.canonicalPath;
+}
+export async function repositoryIdentity(directory: string) {
+  const checkout = directoryIdentity(await repositoryRoot(directory));
+  const common = directoryIdentity(path.resolve(checkout.canonicalPath, (await git(checkout.canonicalPath, ['rev-parse', '--git-common-dir'])).trim()));
+  const gitDir = directoryIdentity(path.resolve(checkout.canonicalPath, (await git(checkout.canonicalPath, ['rev-parse', '--git-dir'])).trim()));
+  return { checkout, common, repositoryKey: common.key, checkoutKey: gitDir.key };
 }
 export async function stateDirectory(root: string): Promise<string> {
-  return path.join(path.resolve(root, (await git(root, ['rev-parse', '--git-common-dir'])).trim()), 'peer-capabilities');
+  return path.join((await repositoryIdentity(root)).common.canonicalPath, 'peer-capabilities');
 }
 export async function fingerprint(root: string): Promise<string> {
+  const identity = directoryIdentity(root);
+  root = identity.canonicalPath;
   const head = (await git(root, ['rev-parse', 'HEAD'])).trim();
   const index = await git(root, ['ls-files', '--stage', '-z']);
   const files = (await git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])).split('\0').filter(Boolean);
   const entries: [string, string, number][] = [];
   for (const relative of [...new Set(files)].sort()) {
-    const full = path.resolve(root, relative);
-    if (!full.startsWith(path.resolve(root) + path.sep)) throw new Error('Git path escaped repository');
+    const full = childPath(root, relative);
     try {
+      if (!containsDirectory(identity, directoryIdentity(path.dirname(full)))) throw new Error('Git path escaped repository');
       const info = await lstat(full);
       if (info.isSymbolicLink()) entries.push([relative, contentHash(await readlink(full)), info.mode]);
       else if (info.isFile()) {
