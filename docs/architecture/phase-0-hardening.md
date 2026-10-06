@@ -36,8 +36,17 @@ it into an isolated prefix and running `version` passed. Current content, staged
 content and fetched reachable history scans passed. Sync safety passed all seven
 checks. The 33-case synthetic corpus covers both detection and diagnostic redaction.
 
-Remote verification is pending at the time of this implementation commit; do not
-infer CI success from these local results.
+Implementation commit `f319194409b5b69c100d7a8ef117e5202535832f` passed all four
+required jobs in [verify run 37465850764](https://github.com/devgupta-9/peer-capabilities/actions/runs/37465850764):
+portable Windows, portable Linux, portable macOS, and supplemental Windows.
+The supplemental job separately passed current-content and fetched-history scanning,
+Python/Node validation, dependency checks, sync safety, bridge tests and both audits.
+This is core-runtime CI evidence, not live-adapter/platform certification.
+
+The original local working tree also passed **111/111 tests**, including preserved
+uncommitted Antigravity work. Those extra changes are not part of the pushed Phase-0
+implementation. The documentation-only evidence follow-up must also receive its
+own exact-SHA `verify` result before handoff.
 
 Local Windows verification and exact-commit Actions results must be recorded with
 the delivered commit. A workflow definition alone is not cross-platform evidence.
