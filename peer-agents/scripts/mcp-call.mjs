@@ -5,10 +5,13 @@ import path from 'node:path';
 export async function callBridge(tool, args = {}, options = {}) {
   const bridgeRoot = fileURLToPath(new URL('../', import.meta.url));
   const child = spawn(process.execPath, [options.entry ?? path.join(bridgeRoot, 'dist/index.js'), ...(options.args ?? [])], {
-    cwd: bridgeRoot, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: options.cwd ?? bridgeRoot, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, ...options.env },
   });
   let sequence = 0;
+  const closed = new Promise(resolve => child.once('close', resolve));
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
   let buffer = '';
   let diagnostics = '';
   const pending = new Map();
@@ -38,7 +41,8 @@ export async function callBridge(tool, args = {}, options = {}) {
     pending.set(id, { resolve, reject });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
   });
-  const timeout = setTimeout(() => fail(new Error('MCP verification timed out')), ((args.timeoutSeconds ?? 30) + 30) * 1000);
+  // Discovery may take 90s on a cold provider startup, before the model turn begins.
+  const timeout = setTimeout(() => fail(new Error('MCP verification timed out')), ((args.timeoutSeconds ?? 30) + 120) * 1000);
   try {
     await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'peer-verification', version: '1.0.0' } });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
@@ -47,6 +51,8 @@ export async function callBridge(tool, args = {}, options = {}) {
     clearTimeout(timeout);
     child.stdin.end();
     child.kill();
+    // On Windows the process must exit before callers can remove its working directory.
+    await closed;
   }
 }
 

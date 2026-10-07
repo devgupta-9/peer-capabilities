@@ -91,15 +91,37 @@ By default, installation backs up the affected files under `%USERPROFILE%\.ai-ru
 
 This behavior is intentional and is verified in strict mode. To preserve existing Antigravity safety settings, run `install.ps1 -SkipAntigravitySafety`; installation validation then treats differences as warnings instead of failures.
 
+Command grants are **opt-in**: `-GrantAntigravityInspection` adds anchored, enumerated Git inspection rules for `command` and `unsandboxed`. These are global provider rules, not directory-bound sandbox permissions. Existing deny/ask rules are preserved and may still block them. No blanket execution grant, credential copying, or automatic sandbox downgrade occurs.
+
 ### Peer delegation safety
 
 - Delegation requires a Git repository inside `PEER_AGENTS_ALLOWED_ROOTS`. When that variable is absent, the repository that launched the MCP server is the only allowed root. Multiple explicit roots use the platform path separator (`;` on Windows).
-- Codex prompts are sent through stdin. Antigravity argv prompts are rejected above a conservative Windows-safe length.
+- Both providers receive task prompts through stdin. Antigravity uses its stream-JSON protocol, preserving plan mode without the Windows command-line length limit.
 - Delegated Codex sessions explicitly disable their own `peer-agents` MCP. The depth environment guard and no-recursion prompt remain additional protection.
 - `IMPLEMENT` writes Git's binary patch directly to disk, verifies it with `git apply --check`, hashes it, and only then removes the temporary worktree. Any export or verification failure preserves the worktree and partial patch for recovery.
 - `READ_ONLY` and `REVIEW` remain best-effort modes. Git-status comparison is a tripwire, not a complete filesystem sandbox; the lead must verify results.
 
 The Codex exclusion policy is configurable in `peer-agents/policy.json` or through an absolute `PEER_AGENTS_POLICY_FILE` path. There are no capability tiers or silent model substitutions.
+
+For a new project, install with explicit project roots, for example `./install.ps1 -DelegationRoots 'D:\my-project'`. Reinstallation preserves existing roots when this argument is omitted; a fresh installation defaults to the origin repository only. The roots must be specific project folders, not entire drives or user profiles. Configure the corresponding trusted workspace and scoped read permission through Antigravity's settings; do not disable its permission system. Reconnect each host after registration changes.
+
+Call `peer_capabilities` with the intended `cwd` before delegation: check `workspace.ready`, CLI availability, and `antigravity.modelDiscovery.status`. CLI installation alone does not prove a project is authorized or provider authentication is working. Model discovery permits a bounded 90-second cold startup and caches successful observations for 60 seconds; failures are reported explicitly, without stale-model fallback. See [Antigravity troubleshooting](peer-agents/README.md#antigravity-call-health).
+
+Antigravity's OS sandbox is required by default. If the installed OS cannot support it, an explicit `-AntigravitySandboxMode permissions-only` registration retains provider permission checks but does not provide filesystem isolation. The bridge reports this choice and never downgrades automatically; reinstall preserves the explicit choice unless overridden. Do not confuse this with `--dangerously-skip-permissions`, which is never used.
+
+### Verify Antigravity on your own machine
+
+Setup and MCP discovery deliberately report authentication as `UNKNOWN` and live delegation as `UNVERIFIED`. They do not spend a model turn or log in for you. Complete the provider's official interactive `agy` login, choose an exact model from `agy models`, then run this from the installed checkout:
+
+```powershell
+node peer-agents/scripts/doctor-antigravity.mjs --cwd 'D:\my-project' --model gemini-3.1-pro-high --effort high --verify
+```
+
+Use an available model with matching effort. Add `--sandbox-mode permissions-only` only if you explicitly accept permission-controlled execution without OS isolation; otherwise sandboxing is required. Without `--verify`, the command performs discovery only.
+
+The live check consumes provider quota, creates a temporary proof file in the selected repository, and requires observed file-read, exact `git status --short`, and `git rev-parse --show-toplevel` tool events plus the file's unpredictable proof value. Command workspace evidence and the observed Git root must match the requested project. It removes only its own file and empty directory. Failed checks exit nonzero and give a next action. No response text, provider diagnostics, credentials, or proof value is saved in the report. Verification is scoped to that machine/account/model/workspace and those operations, not arbitrary commands, all platforms, or an already-running host's MCP registration. Reconnect hosts separately after registration changes.
+
+This readiness command is development-checkout functionality, not a claim that the pinned v0.3.0 bootstrap already includes it. Fresh-user and cross-platform live certification remain pending.
 
 ## Maintenance
 

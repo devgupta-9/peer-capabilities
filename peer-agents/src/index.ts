@@ -12,6 +12,7 @@ import { authorizeWorkingDirectory } from './path-policy.js';
 import { runCapture, truncate } from './process.js';
 import { finalizeImplementationWorktree, type ImplementationPatch } from './worktree.js';
 import { childEnvironment, redact } from './security.js';
+import { antigravitySandboxMode, discoverAntigravityModels, runAntigravity } from './antigravity.js';
 
 type AgentName = 'codex' | 'antigravity';
 type Mode = 'READ_ONLY' | 'REVIEW' | 'IMPLEMENT';
@@ -25,7 +26,6 @@ const MAX_TASK_CHARS = Number.isSafeInteger(parsedMaxTaskChars)
   && parsedMaxTaskChars <= 100_000
   ? parsedMaxTaskChars
   : 24_000;
-const MAX_ANTIGRAVITY_ARGV_PROMPT_CHARS = 20_000;
 const parsedDelegationDepth = Number(process.env.PEER_AGENTS_DEPTH ?? '0');
 const DELEGATION_DEPTH = Number.isSafeInteger(parsedDelegationDepth) && parsedDelegationDepth >= 0
   ? parsedDelegationDepth
@@ -60,22 +60,7 @@ async function commandVersion(command: string): Promise<string | null> {
   }
 }
 
-async function agyModels(): Promise<string[]> {
-  try {
-    const result = await runCapture(process.env.PEER_AGY_BIN ?? 'agy', ['models'], {
-      timeoutSeconds: 20,
-    });
-    if (result.code !== 0) return [];
-    return result.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => line.split(/\s+/)[0])
-      .filter((slug) => /^[a-z0-9][a-z0-9._-]*$/i.test(slug));
-  } catch {
-    return [];
-  }
-}
+const agyModels = discoverAntigravityModels({ command: process.env.PEER_AGY_BIN ?? 'agy' });
 
 async function gitRoot(cwd: string): Promise<string | null> {
   try {
@@ -140,6 +125,9 @@ function buildPrompt(args: {
     'CONSTRAINTS:',
     ...modeRules.map((rule) => `- ${rule}`),
     '- Never expose secrets, tokens, credentials, or sensitive environment values.',
+    ...(args.target === 'antigravity' ? [
+      '- Prefer view_file for repository reads. Run permitted Git inspection commands from the current working directory, without git -C or shell wrappers.',
+    ] : []),
     '- Verify material claims against repository evidence, runtime evidence, or authoritative documentation when available.',
     '- Do not claim tests/checks were performed unless they actually were.',
     '',
@@ -251,99 +239,6 @@ async function runCodex(input: {
   };
 }
 
-async function runAntigravity(input: {
-  prompt: string;
-  cwd: string;
-  choice: ModelChoice;
-  mode: Mode;
-  timeoutSeconds: number;
-}): Promise<{
-  response: string;
-  stderr: string;
-  choice: ModelChoice;
-  durationMs: number;
-  usage?: unknown;
-  conversationId?: string;
-}> {
-  if (input.prompt.length > MAX_ANTIGRAVITY_ARGV_PROMPT_CHARS) {
-    throw new Error(
-      `Antigravity delegation prompt exceeds the Windows-safe argument limit (${MAX_ANTIGRAVITY_ARGV_PROMPT_CHARS} characters). Shorten the task or deliverable.`,
-    );
-  }
-  const choice = input.choice;
-  const args = [
-    '-p',
-    input.prompt,
-    '--output-format',
-    'json',
-    '--effort',
-    choice.effort,
-    '--print-timeout',
-    `${Math.ceil(input.timeoutSeconds / 60)}m`,
-    '--mode',
-    input.mode === 'IMPLEMENT' ? 'accept-edits' : 'plan',
-    '--sandbox',
-    '--add-dir',
-    input.cwd,
-  ];
-  if (input.mode !== 'IMPLEMENT') args.push('--disable-slash-commands');
-  if (choice.model) args.push('--model', choice.model);
-
-  const env = {
-    ...childEnvironment(process.env, 'antigravity'),
-    PEER_AGENTS_DEPTH: String(DELEGATION_DEPTH + 1),
-    PEER_AGENTS_ALLOWED_ROOTS: input.cwd,
-  };
-  const result = await runCapture(process.env.PEER_AGY_BIN ?? 'agy', args, {
-    cwd: input.cwd,
-    timeoutSeconds: input.timeoutSeconds + 15,
-    env,
-  });
-
-  if (result.timedOut) throw new Error(`Antigravity delegation timed out after ${input.timeoutSeconds}s.`);
-  if (result.code !== 0) {
-    throw new Error(`Antigravity delegation failed with exit code ${result.code}. ${result.stderr || result.stdout}`);
-  }
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`Antigravity returned invalid JSON: ${truncate(result.stdout, 8_192)}`);
-  }
-  if (parsed.status !== 'SUCCESS') {
-    throw new Error(`Antigravity delegation status ${String(parsed.status)}: ${String(parsed.error ?? '')}`);
-  }
-
-  const response = String(parsed.response ?? '').trim();
-  const stderr = result.stderr.trim();
-
-  const permissionDenied =
-    /permission.*denied|auto-denied|soft-denied|required the ["']?command["']? permission/i.test(
-      stderr,
-    );
-
-  if (!response && permissionDenied) {
-    throw new Error(
-      `Antigravity produced no result because a required permission was denied. ${truncate(stderr, 8192)}`,
-    );
-  }
-
-  if (!response) {
-    throw new Error(
-      `Antigravity reported SUCCESS but returned an empty response. ${truncate(stderr, 8192)}`,
-    );
-  }
-
-  return {
-    response,
-    stderr,
-    choice,
-    durationMs: result.durationMs,
-    usage: parsed.usage,
-    conversationId: parsed.conversation_id,
-  };
-}
 
 function createServer(): McpServer {
   const server = new McpServer(
@@ -360,17 +255,27 @@ function createServer(): McpServer {
       title: 'Peer agent capabilities',
       description:
         'Discover CLI availability, model catalogs, supported reasoning efforts and restrictions without spending a model turn. Catalog listing does not guarantee account access.',
-      inputSchema: z.object({}),
+      inputSchema: z.object({ cwd: z.string().optional().describe('Optional project path for a no-model-turn authorization preflight.') }),
     },
-    async () => {
+    async ({ cwd }) => {
       const [codexVersion, agyVersion, models, catalog] = await Promise.all([
         commandVersion(CODEX_BIN),
         commandVersion(process.env.PEER_AGY_BIN ?? 'agy'),
         agyModels(),
         codexCatalog(),
       ]);
+      let workspace: { ready: boolean; cwd: string; gitRoot?: string; error?: string } | undefined;
+      if (cwd) {
+        try {
+          const authorized = await authorizeWorkingDirectory(cwd);
+          workspace = { ready: true, cwd: authorized.cwd, gitRoot: authorized.gitRoot };
+        }
+        catch (error) { workspace = { ready: false, cwd, error: error instanceof Error ? error.message : String(error) }; }
+      }
       return toolText({
         bridgeVersion: SERVER_VERSION,
+        invocationProtocol: 'antigravity-stream-json-stdin-v1',
+        workspace,
         delegationDepth: DELEGATION_DEPTH,
         maxDelegationDepth: 1,
         codex: {
@@ -382,8 +287,17 @@ function createServer(): McpServer {
         antigravity: {
           available: Boolean(agyVersion),
           version: agyVersion,
-          models,
+          models: models.models,
+          modelDiscovery: { ...models, models: undefined },
           efforts: ['low', 'medium', 'high'],
+          sandboxMode: antigravitySandboxMode(),
+          readiness: {
+            presence: agyVersion ? 'INSTALLED' : 'DISCOVERED',
+            configuration: workspace?.ready ? 'CONFIGURED' : 'UNVERIFIED',
+            authentication: 'UNKNOWN', verification: 'UNVERIFIED',
+            scope: 'CLI/catalog and bridge root preflight only; provider tools have not been verified',
+            nextAction: 'Run doctor-antigravity.mjs with --verify and an exact model/effort to test real delegation.',
+          },
           permissionPolicy: 'CLI permissions enforced; no approval bypass.',
         },
         modes: {
@@ -456,9 +370,11 @@ function createServer(): McpServer {
       let beforeStatus: string | null = null;
 
       try {
+        const agyCatalog = target === 'antigravity' ? await agyModels() : undefined;
+        if (agyCatalog && agyCatalog.status !== 'AVAILABLE') throw new Error(agyCatalog.error);
         const choice = validateChoice(target, model, effort,
           target === 'codex' ? (await codexCatalog()).models : [],
-          target === 'antigravity' ? await agyModels() : []);
+          agyCatalog?.models ?? []);
         if (mode === 'IMPLEMENT') {
           isolated = await prepareImplementationWorktree(requestedCwd);
           executionCwd = isolated.worktree;
@@ -470,7 +386,7 @@ function createServer(): McpServer {
         const result =
           target === 'codex'
             ? await runCodex({ prompt, cwd: executionCwd, choice, mode, timeoutSeconds })
-            : await runAntigravity({ prompt, cwd: executionCwd, choice, mode, timeoutSeconds });
+            : await runAntigravity({ prompt, cwd: executionCwd, choice, mode, timeoutSeconds }, DELEGATION_DEPTH);
 
         let policyViolation: string | undefined;
         if (mode !== 'IMPLEMENT' && beforeStatus !== null) {
@@ -500,7 +416,10 @@ function createServer(): McpServer {
           response: result.response,
           ...(target === 'antigravity'
             ? {
-              antigravityUsage: 'usage' in result ? result.usage : undefined,
+                antigravityUsage: 'usage' in result ? result.usage : undefined,
+                antigravitySandboxMode: antigravitySandboxMode(),
+                antigravityToolFailures: 'toolFailures' in result ? result.toolFailures : [],
+                antigravityToolEvidence: 'toolEvidence' in result ? result.toolEvidence : [],
               antigravityConversationId:
                 'conversationId' in result ? result.conversationId : undefined,
             }

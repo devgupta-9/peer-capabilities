@@ -3,7 +3,7 @@
   "version": "0.4.0-dev.0",
   "private": true,
   "bin": { "peer-capabilities": "bin/peer-capabilities.mjs" },
-  "files": ["bin/", "dist/", "security-policy.mjs", "policy.json", "examples/", "README.md"],
+  "files": ["bin/", "dist/", "security-policy.mjs", "policy.json", "examples/", "README.md", "scripts/doctor-antigravity.mjs", "scripts/mcp-call.mjs"],
   "type": "module",
   "engines": {
     "node": ">=24"

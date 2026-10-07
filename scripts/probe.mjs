@@ -26,7 +26,7 @@ let bytes = 0;
 let stderrBytes = 0;
 let names = [];
 let explicitModelSchema = false;
-const timer = setTimeout(() => finish({ ok: false, error: 'timeout' }), 45_000);
+const timer = setTimeout(() => finish({ ok: false, error: 'timeout' }), 110_000);
 
 function finish(result) {
   if (finished) return;
@@ -87,7 +87,7 @@ child.stdout.on('data', (chunk) => {
         && ['model', 'effort', 'selectionReason'].every((key) => delegate.inputSchema.required?.includes(key))
         && !('tier' in delegate.inputSchema.properties);
       if (names.includes('peer_capabilities')) {
-        send({ id: 3, method: 'tools/call', params: { name: 'peer_capabilities', arguments: {} } });
+        send({ id: 3, method: 'tools/call', params: { name: 'peer_capabilities', arguments: { cwd: spec.workspace ?? spec.cwd } } });
       } else {
         finish({ ok: true, tools: names, explicitModelSchema });
       }
@@ -107,6 +107,9 @@ child.stdout.on('data', (chunk) => {
           peerCapabilitiesChecked: true,
           codexAvailable: payload.codex?.available === true,
           antigravityAvailable: payload.antigravity?.available === true,
+          antigravityModelsAvailable: payload.antigravity?.models?.length > 0,
+          workspaceReady: payload.workspace?.ready === true,
+          antigravityReadiness: payload.antigravity?.readiness ?? { authentication: 'UNKNOWN', verification: 'UNVERIFIED' },
         });
       } catch {
         finish({ ok: false, error: 'peer_capabilities_invalid' });

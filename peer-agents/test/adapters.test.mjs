@@ -2,6 +2,37 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 const load = () => import('../dist/runtime/adapters.js');
 
+test('Antigravity runtime rejects soft denials and ambiguous terminal results', async () => {
+  const { ProviderAdapter } = await load();
+  const final = { event: 'result', result: { status: 'SUCCESS', response: 'Approved' } };
+  const choice = { agent: 'antigravity', model: 'fixture-high', effort: 'high', efforts: ['high'],
+    authentication: 'AUTHENTICATED', availability: 'AVAILABLE' };
+  for (const [events, stderr, expected] of [
+    [[final], '', 'AVAILABLE'],
+    [[final], 'command permission auto-denied', 'POLICY_BLOCKED'],
+    [[{ ...final, result: { ...final.result, denied_actions: ['command'] } }], '', 'POLICY_BLOCKED'],
+    [[{ event: 'step_update', step_update: { state: 'DONE', tool_name: 'run_command',
+      tool_info: { error: { message: 'permission denied' } } } }, final], '', 'POLICY_BLOCKED'],
+    [[final, final], '', 'EXECUTION_ERROR'],
+  ]) {
+    const capture = async () => ({ code: 0, timedOut: false, cancelled: false,
+      stdoutTruncated: false, stderrTruncated: false, durationMs: 1, stderr,
+      stdout: events.map(JSON.stringify).join('\n') });
+    const adapter = new ProviderAdapter({ id: 'antigravity', executable: process.execPath, experimental: true }, undefined, capture);
+    adapter.discover = async () => ({ observation: {}, choices: [choice] });
+    const result = await adapter.execute({ id: 'probe', taskId: 'fixture', cwd: process.cwd(), role: 'consultant', choice, prompt: 'Inspect fixture' });
+    assert.equal(result.availability, expected);
+  }
+});
+
+test('runtime Antigravity sandbox selection is explicit and defaults to required', async () => {
+  const { providerCommand, adapterConfigSchema } = await load();
+  const input = { cwd: '/fixture', role: 'consultant', choice: { model: 'fixture-high', effort: 'high' }, prompt: 'Inspect' };
+  assert.ok(providerCommand('antigravity', input).args.includes('--sandbox'));
+  assert.ok(providerCommand('antigravity', input, 'permissions-only').args.includes('--sandbox=false'));
+  assert.equal(adapterConfigSchema.parse({ id: 'antigravity', sandboxMode: 'permissions-only' }).sandboxMode, 'permissions-only');
+});
+
 test('Codex reviews require a completed turn and reject failed, unfinished, or malformed streams', async () => {
   const { ProviderAdapter } = await load();
   const message = { type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify({ outcome: 'APPROVE', findings: [] }) } };

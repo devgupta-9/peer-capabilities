@@ -103,17 +103,26 @@ def probe(job):
     try:
         env=actual.get("env",{})
         spec={"command":actual["command"],"args":actual.get("args",[]),"env":env,"cwd":str(ROOT)}
-        result=subprocess.run(["node",str(ROOT/"scripts/probe.mjs")],input=json.dumps(spec),text=True,capture_output=True,timeout=55)
+        roots=env.get("PEER_AGENTS_ALLOWED_ROOTS", "").split(os.pathsep)
+        if name=="peer-agents":
+            spec["workspace"]=roots[0] or str(ROOT)
+            # Do not mask missing roots by launching the probe inside our Git checkout.
+            spec["cwd"]=actual.get("cwd", str(USER))
+        result=subprocess.run(["node",str(ROOT/"scripts/probe.mjs")],input=json.dumps(spec),text=True,capture_output=True,timeout=120)
         data=json.loads(result.stdout)
         row["discovered"]=bool(data.get("ok"))
         row["tools"]=data.get("tools",[])
         if name=="peer-agents":
             row["explicit_model_schema"]=data.get("explicitModelSchema",False)
             row["peer_capabilities_checked"]=data.get("peerCapabilitiesChecked",False)
+            row["workspace_ready"]=data.get("workspaceReady",False)
+            row["antigravity_models_available"]=data.get("antigravityModelsAvailable",False)
+            row["antigravity_readiness"]=data.get("antigravityReadiness",{"authentication":"UNKNOWN","verification":"UNVERIFIED"})
             row["peer_cli_availability"]={"codex":data.get("codexAvailable",False),"antigravity":data.get("antigravityAvailable",False)}
         peer_ok=name!="peer-agents" or (
             data.get("explicitModelSchema") and data.get("peerCapabilitiesChecked")
             and data.get("codexAvailable") and data.get("antigravityAvailable")
+            and data.get("antigravityModelsAvailable") and data.get("workspaceReady")
         )
         if not data.get("ok") or not peer_ok:
             return f"{host}/{name}: MCP probe failed"
@@ -156,6 +165,9 @@ if not report["security"]["broad_cli_trust_absent"]: (errors if args.strict_secu
 required_deny=r'command(regex:\bgit(?:\.exe)?\s+.*\b(push|pull|fetch|merge|rebase|checkout|switch|reset|restore|stash|clean|commit|add|rm|mv)\b.*)'
 report["security"]["cli_mutating_git_deny_present"]=required_deny in cli.get("permissions",{}).get("deny",[])
 if not report["security"]["cli_mutating_git_deny_present"]: (errors if args.strict_security else warnings).append("CLI mutating Git deny rule missing")
+filesystem_rules=[rule for rule in cli.get("permissions",{}).get("allow",[]) if isinstance(rule,str)]
+if any(rule.startswith(("read_file(regex:","write_file(regex:")) for rule in filesystem_rules):
+    errors.append("Antigravity filesystem rules use unsupported regex syntax; use literal directory/file paths before invoking the terminal sandbox")
 report["managed_files"]=len(source_pairs)
 report["headroom_proxy"]={"health":"not_tested","session_routing":"not_verified"}
 if args.probe:

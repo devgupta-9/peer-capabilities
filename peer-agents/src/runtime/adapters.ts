@@ -5,12 +5,14 @@ import path from 'node:path';
 import * as z from 'zod/v4';
 import { parseCodexCatalog, validateChoice, type Effort } from '../model-policy.js';
 import { runCapture } from '../process.js';
+import { antigravityCommand, discoverAntigravityModels, parseAntigravityResult } from '../antigravity.js';
 import { childEnvironment, redact, assertNonSecret } from '../security.js';
 import type { AgentAdapter, AgentResult, Authentication, Availability, Choice, Invocation, Observation } from './contracts.js';
 
 export const adapterConfigSchema = z.object({
   id: z.enum(['codex', 'antigravity']), executable: z.string().min(1).optional(),
   experimental: z.boolean().default(false),
+  sandboxMode: z.enum(['required', 'permissions-only']).default('required'),
   profiles: z.array(z.object({
     model: z.string().min(1), effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
     competence: z.number().min(0).max(10), cost: z.number().nonnegative(),
@@ -26,11 +28,12 @@ export function normalizeFailure(message: string, timedOut: boolean): Availabili
   if (/rate.?limit|too many requests|429/i.test(message)) return 'RATE_LIMITED';
   if (/authenticat|please (?:log.?in|sign.?in)|not logged in/i.test(message)) return 'AUTH_REQUIRED';
   if (/model.*(?:unavailable|not found|unsupported)/i.test(message)) return 'MODEL_UNAVAILABLE';
-  if (/permission.*denied|policy.*block|auto-denied/i.test(message)) return 'POLICY_BLOCKED';
+  if (/permission.*denied|policy.*block|auto-denied|denied actions|blocked by a required permission|exebox:|sandbox configuration/i.test(message)) return 'POLICY_BLOCKED';
   if (/service unavailable|503|connection refused/i.test(message)) return 'SERVICE_UNAVAILABLE';
   return 'EXECUTION_ERROR';
 }
-export function providerCommand(provider: Provider, input: Pick<Invocation, 'cwd' | 'role' | 'choice' | 'prompt'>) {
+export function providerCommand(provider: Provider, input: Pick<Invocation, 'cwd' | 'role' | 'choice' | 'prompt'>,
+  sandboxMode: 'required' | 'permissions-only' = 'required') {
   if (provider === 'codex') return {
     args: ['--ask-for-approval', 'never', 'exec', '--ignore-user-config', '--ephemeral', '--json',
       '--cd', input.cwd, '--sandbox', input.role === 'lead' ? 'workspace-write' : 'read-only',
@@ -39,13 +42,9 @@ export function providerCommand(provider: Provider, input: Pick<Invocation, 'cwd
       '--model', input.choice.model, '-'],
     input: input.prompt,
   };
-  return {
-    args: ['--input-format', 'stream-json', '--output-format', 'stream-json',
-      '--model', input.choice.model, '--effort', input.choice.effort,
-      '--mode', input.role === 'lead' ? 'accept-edits' : 'plan', '--sandbox', '--add-dir', input.cwd,
-      '--print-timeout', '10m'],
-    input: JSON.stringify({ event: 'user', message: { content: input.prompt } }) + '\n',
-  };
+  return antigravityCommand({ cwd: input.cwd, prompt: input.prompt,
+    choice: { model: input.choice.model, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']).parse(input.choice.effort), fallback: false },
+    mode: input.role === 'lead' ? 'IMPLEMENT' : 'READ_ONLY', timeoutSeconds: 600, sandboxMode });
 }
 async function executable(config: Config): Promise<string> {
   if (config.executable) {
@@ -99,8 +98,7 @@ export class ProviderAdapter implements AgentAdapter {
       observation.authentication = auth.code === 0 && /logged in/i.test(status) ? 'AUTHENTICATED'
         : /not logged in|authentication required/i.test(status) ? 'AUTH_REQUIRED' : 'UNKNOWN';
     } else {
-      const models = await this.capture(command, ['models'], { timeoutSeconds: 20, env: childEnvironment(process.env, this.id) });
-      if (models.code === 0) agyModels = models.stdout.split(/\r?\n/).map(line => line.trim().split(/\s+/)[0]).filter(Boolean);
+      agyModels = (await discoverAntigravityModels({ command, capture: this.capture })()).models;
     }
     if (this.verification?.verification === 'VERIFIED' && this.verification.version === observation.version &&
       this.verification.expiresAt && Date.parse(this.verification.expiresAt) > Date.now()) {
@@ -133,7 +131,7 @@ export class ProviderAdapter implements AgentAdapter {
     const verified = result.availability === 'AVAILABLE' && result.response.trim() === 'PEER_OK';
     this.verification = { ...discovery.observation,
       authentication: verified ? 'AUTHENTICATED' : result.availability === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'UNKNOWN',
-      verification: verified ? 'VERIFIED' : 'UNAVAILABLE', scope: 'exact model: ' + choice.model,
+      verification: verified ? 'VERIFIED' : 'UNAVAILABLE', scope: 'model response only (tools unverified): ' + choice.model,
       expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), reason: result.availability,
     };
     return this.verification;
@@ -152,10 +150,11 @@ export class ProviderAdapter implements AgentAdapter {
     const prompt = input.role === 'reviewer'
       ? input.prompt + '\nReturn ONLY JSON: {"outcome":"APPROVE|REQUEST_CHANGES|BLOCKED","findings":["material findings with source evidence"]}.'
       : input.prompt;
-    const request = providerCommand(this.id, { ...input, prompt });
+    const request = providerCommand(this.id, { ...input, prompt }, this.config.sandboxMode);
     try {
       const result = await this.capture(await executable(this.config), request.args, {
         cwd: input.cwd, timeoutSeconds: 615, input: request.input, signal: input.signal,
+        maxOutputBytes: this.id === 'antigravity' ? 8 * 1024 * 1024 : undefined,
         env: { ...childEnvironment(process.env, this.id), PEER_AGENTS_DEPTH: '1', PEER_AGENTS_ALLOWED_ROOTS: input.cwd },
       });
       if (result.code !== 0 || result.timedOut || result.cancelled || result.stdoutTruncated || result.stderrTruncated) {
@@ -165,9 +164,9 @@ export class ProviderAdapter implements AgentAdapter {
       let response: string;
       let session: string | undefined;
       if (this.id === 'antigravity') {
-        const final = events.findLast(event => event.event === 'result')?.result;
-        if (!final || final.status !== 'SUCCESS') return { availability: normalizeFailure(String(final?.error ?? ''), false), response: 'Provider did not return success' };
-        response = String(final.response ?? ''); session = final.conversation_id;
+        const parsed = parseAntigravityResult(result);
+        if (parsed.toolFailures.length) return { availability: 'EXECUTION_ERROR', response: 'Provider reported tool failures; review is not verified' };
+        response = parsed.response; session = parsed.conversationId;
       } else {
         if (events.at(-1)?.type !== 'turn.completed' || events.some(event => event.type === 'turn.failed' || event.type === 'error')) {
           return { availability: 'EXECUTION_ERROR', response: 'Provider turn failed or did not complete' };
@@ -177,6 +176,6 @@ export class ProviderAdapter implements AgentAdapter {
       if (!response.trim()) return { availability: 'EXECUTION_ERROR', response: 'Empty provider response' };
       const review = input.role === 'reviewer' ? reviewSchema.parse(JSON.parse(response)) : undefined;
       return { availability: 'AVAILABLE', response: redact(response), ...(session ? { session } : {}), ...(review ? { review } : {}) };
-    } catch { return { availability: 'EXECUTION_ERROR', response: 'Provider execution or result validation failed; no raw diagnostic persisted' }; }
+    } catch (error) { return { availability: normalizeFailure(error instanceof Error ? error.message : '', false), response: 'Provider execution or result validation failed; no raw diagnostic persisted' }; }
   }
 }

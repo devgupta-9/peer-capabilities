@@ -37,7 +37,7 @@ Reverse direction uses caller=antigravity and an allowed exact Codex model/effor
 
 Depth is capped at one through PEER_AGENTS_DEPTH; delegated Codex sessions also disable their own peer-agents MCP, invalid depth values fail closed, and prompts forbid further delegation. Every delegated directory must be a Git repository inside PEER_AGENTS_ALLOWED_ROOTS, or inside the repository that launched the MCP server when no roots are configured.
 
-READ_ONLY and REVIEW prohibit file changes. Codex uses its read-only sandbox. Antigravity requests plan mode, sandbox, and normal CLI permission enforcement, with slash expansion disabled for read-only work. The installed agy CLI warns that plan mode has no effect with slash expansion disabled: do not treat plan mode as an enforced read-only boundary. Normal permissions and explicit no-write instructions still apply. The bridge does not bypass approval prompts. Permission denial is a real limitation to report.
+READ_ONLY and REVIEW prohibit file changes. Codex uses its read-only sandbox. Antigravity requests plan mode and normal CLI permission enforcement; slash expansion is not disabled because that would disable plan mode in the tested CLI. OS sandboxing is required unless the user explicitly selects `permissions-only`. Plan mode and Git-status comparisons are not complete read-only enforcement. The bridge does not bypass approval prompts. Permission denial is a real limitation to report.
 
 Git status before/after is a supplementary change detector, not a filesystem security boundary. It cannot detect all changes to already-dirty files or non-Git directories. The lead must verify work and must not automatically revert unknown changes.
 
@@ -79,11 +79,12 @@ The installer writes the real absolute path. `C:\Users\you` below is documentati
 command = "node"
 args = ["C:\\Users\\you\\.ai-rules\\peer-agents\\dist\\index.js"]
 enabled = true
-tool_timeout_sec = 1860
+tool_timeout_sec = 1980
 
 [mcp_servers.peer-agents.env]
 PEER_CODEX_BIN = "C:\\path\\to\\codex.exe"
 PEER_AGY_BIN = "C:\\path\\to\\agy.exe"
+PEER_AGENTS_ALLOWED_ROOTS = "D:\\my-project"
 ```
 
 Existing Antigravity CLI registration is ~/.gemini/config/mcp_config.json:
@@ -96,7 +97,8 @@ Existing Antigravity CLI registration is ~/.gemini/config/mcp_config.json:
       "args": ["C:\\Users\\you\\.ai-rules\\peer-agents\\dist\\index.js"],
       "env": {
         "PEER_CODEX_BIN": "C:\\path\\to\\codex.exe",
-        "PEER_AGY_BIN": "C:\\path\\to\\agy.exe"
+        "PEER_AGY_BIN": "C:\\path\\to\\agy.exe",
+        "PEER_AGENTS_ALLOWED_ROOTS": "D:\\my-project"
       }
     }
   }
@@ -123,3 +125,28 @@ node scripts/mcp-call.mjs peer_capabilities
 ```
 
 Pass a JSON object as the second argument for a bounded delegate_peer call.
+
+## Antigravity call health
+
+The repaired bridge uses AGY's `--input-format stream-json` / `--output-format stream-json` protocol, tested with AGY 1.2.16. It sends the prompt on stdin and keeps `--mode plan` for read-only calls. It does not combine plan mode with `--disable-slash-commands`, which disables that mode on the tested CLI. Exact model and effort are retained; no automatic substitution or provider-turn retry occurs.
+
+`PEER_AGY_SANDBOX_MODE` defaults to `required` (`--sandbox`). On a machine that cannot provide AGY's OS sandbox, a user may explicitly select `permissions-only` (`--sandbox=false`). This retains the provider's allow/deny/approval rules but is **not filesystem isolation**. Both discovery and delegation results expose the selected mode; unknown values fail closed, and a failed sandbox never triggers automatic downgrade. The installer accepts `-AntigravitySandboxMode` and otherwise preserves the registered choice, rejecting conflicting host settings. Re-enable `required` after installing and verifying the needed OS support.
+
+- Set `PEER_AGENTS_ALLOWED_ROOTS` in **both** host registrations. An MCP launched by a desktop app may not start inside a Git repository.
+- Antigravity must separately trust the named project and permit its required reads/commands. Preserve Git mutation denials for review. Never solve this by trusting an entire drive or enabling a blanket permission bypass.
+- Windows can require full-line `command(regex:...)` matches and a separate `unsandboxed` grant. The installer's explicit `-GrantAntigravityInspection` option permits only enumerated Git inspection lines (for example, `git status --short`), anchored at both ends for both action types. These provider rules are global, not bound to project directories. Deny/ask rules still take precedence. Shell chains, arbitrary flags, write commands and global `command(*)` / `unsandboxed(*)` are not granted. See the [official permission documentation](https://www.antigravity.google/docs/permissions?tab=cli).
+- Filesystem rules must use supported literal paths such as `read_file(D:\my-project)`, not `read_file(regex:...\\.*)`. The latter can prevent terminal sandbox construction even when a command itself is permitted. Validation flags this configuration error.
+- `peer_capabilities({cwd: project})` reports workspace readiness without a model turn. `invocationProtocol: antigravity-stream-json-stdin-v1` identifies the new bridge. Discovery reports `AVAILABLE`, `TIMEOUT` or `UNAVAILABLE`, with observation time/cache status; an empty catalog is not interpreted as an unsupported user-selected model.
+- A complete terminal result is required. Missing/empty/malformed/truncated results, denied permissions and provider failures cannot masquerade as successful reviews.
+- After an upgrade, reconnect the host MCP or restart that host. An already-running server retains old code and launch environment. A successful fresh-process probe does not prove an existing chat reloaded it.
+- Provider outages, expired authentication and exhausted quota remain real failures, not conditions the bridge can truthfully guarantee away.
+
+Regression checks: `npm run build`, `npm test`, and (from the repository root) `pwsh -File scripts/test-peer-roots.ps1`. A real read-only provider call is still required to verify account access; the test suite uses deterministic protocol checks, not paid model calls.
+
+Run `node scripts/doctor-antigravity.mjs --cwd <absolute-project> --model <exact-model> --effort <effort> --verify` from this package directory for an opt-in live check. It requires provider tool-event evidence and a generated file proof, not merely the model claiming success. An explicit `--sandbox-mode permissions-only` accepts the non-isolated mode; default remains `required`. It never changes provider settings or authenticates automatically. See the root README for scope and cleanup details.
+
+Both the compatibility bridge and experimental runtime use the same Antigravity command builder and parser. A `DONE` tool event can still carry an error; permission/sandbox errors and denied actions cannot be masked by terminal `SUCCESS`. Other tool failures remain visible on bridge results and prevent experimental runtime review acceptance. Runtime adapter configuration accepts explicit `sandboxMode`; model-only runtime verification labels tools as unverified.
+
+Local evidence (2026-10-07): Windows x64, Node 24.18.0, AGY 1.3.1, `gemini-3.1-pro-high` / `high`, explicit `permissions-only`: fresh-process bridge delegation passed the fixture read/proof, exact Git-status command, command-workspace evidence, and observed Git-root checks with zero reported tool failures. This used an existing provider account and permissions; it is **not** a clean-install or cross-platform certification. A separate source-review consultation hit its 180-second timeout, so tool readiness does not imply every consultation will complete within a chosen deadline.
+
+AGY 1.3.1's observed command events contain only `CommandLine`; the initial session event records the working directory. The parser uses that initial directory only when the tool does not provide an explicit `Cwd`. Invalid explicit overrides, duplicate/late session initialization, missing directory evidence, or a mismatched Git-root query cannot pass readiness. No raw command output or file content is exported as tool evidence.

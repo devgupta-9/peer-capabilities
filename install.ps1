@@ -4,7 +4,10 @@ param(
     [switch]$SkipToolInstall,
     [switch]$SkipMcpRegistration,
     [switch]$SkipHeadroomProxy,
-    [switch]$SkipAntigravitySafety
+    [switch]$SkipAntigravitySafety,
+    [switch]$GrantAntigravityInspection,
+    [string[]]$DelegationRoots = @(),
+    [ValidateSet('required', 'permissions-only')][string]$AntigravitySandboxMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,6 +17,7 @@ if (-not $IsWindows) { throw 'This installer currently supports Windows only.' }
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or newer is required.' }
 
 $origin = [IO.Path]::GetFullPath($PSScriptRoot)
+. (Join-Path $origin 'scripts\peer-roots.ps1')
 $userRoot = [Environment]::GetFolderPath('UserProfile')
 $expectedOrigin = [IO.Path]::GetFullPath((Join-Path $userRoot '.ai-rules'))
 $backupRoot = Join-Path $userRoot '.ai-rules-backups'
@@ -216,6 +220,21 @@ function Set-AntigravitySafetySettings {
         $deny += $denyRule
     }
     $cli.permissions.deny = $deny
+    # Windows headless command matching may require the complete command line.
+    # These anchored rules authorize inspection only, never arbitrary arguments/chains.
+    $readCommands = @('git status', 'git status --short', 'git status --porcelain=v1',
+        'git diff', 'git diff --stat', 'git diff --name-only', 'git log -5 --oneline',
+        'git branch --show-current', 'git rev-parse --show-toplevel', 'git ls-files')
+    $allow = @($cli.permissions['allow'] | Where-Object { $_ -is [string] })
+    foreach ($command in $(if ($GrantAntigravityInspection) { $readCommands } else { @() })) {
+        # The Windows terminal backend can require a separate unsandboxed grant.
+        # Scope it to the same exact inspection command, not command(*) or a CLI bypass.
+        foreach ($action in @('command', 'unsandboxed')) {
+            $rule = $action + '(regex:^' + $command + '$)'
+            if ($rule -notin $allow) { $allow += $rule }
+        }
+    }
+    $cli.permissions.allow = $allow
 
     $broadTrust = @(
         (Join-Path $env:SystemRoot 'System32').TrimEnd('\').ToLowerInvariant(),
@@ -337,8 +356,32 @@ Install-HeadroomRouting $headroomPath
 
 if (-not $SkipMcpRegistration) {
     Write-Host '5/7 Registering shared MCP servers'
-    $peerEnvironment = @{ PEER_AGY_BIN = $agyPath; PEER_CODEX_BIN = $codexPeerPath }
-    Register-CodexMcp -Name 'peer-agents' -Command $nodePath -Arguments @($peerPath) -Environment $peerEnvironment -TimeoutSeconds 1860
+    # Registration must not silently lose the project policy during remove/add.
+    $existingPeerRoots = @()
+    $existingSandboxModes = @()
+    if (-not $DelegationRoots.Count -or -not $AntigravitySandboxMode) {
+        $existingCodex = & $codexPath mcp get peer-agents --json 2>$null
+        if ($LASTEXITCODE -eq 0 -and $existingCodex) {
+            $oldPeer = ($existingCodex -join "`n") | ConvertFrom-Json -AsHashtable
+            $oldEnv = if ($oldPeer.ContainsKey('transport')) { $oldPeer['transport']['env'] } else { $oldPeer['env'] }
+            if ($oldEnv -and $oldEnv.ContainsKey('PEER_AGENTS_ALLOWED_ROOTS')) {
+                $existingPeerRoots += $oldEnv.PEER_AGENTS_ALLOWED_ROOTS.Split([IO.Path]::PathSeparator)
+            }
+            if ($oldEnv -and $oldEnv.ContainsKey('PEER_AGY_SANDBOX_MODE')) { $existingSandboxModes += $oldEnv.PEER_AGY_SANDBOX_MODE }
+        }
+        $agyConfig = Read-JsonHashtable (Join-Path $userRoot '.gemini\config\mcp_config.json')
+        if ($agyConfig.ContainsKey('mcpServers') -and $agyConfig.mcpServers.ContainsKey('peer-agents')) {
+            $oldEnv = $agyConfig.mcpServers['peer-agents']['env']
+            if ($oldEnv -and $oldEnv.ContainsKey('PEER_AGENTS_ALLOWED_ROOTS')) {
+                $existingPeerRoots += $oldEnv.PEER_AGENTS_ALLOWED_ROOTS.Split([IO.Path]::PathSeparator)
+            }
+            if ($oldEnv -and $oldEnv.ContainsKey('PEER_AGY_SANDBOX_MODE')) { $existingSandboxModes += $oldEnv.PEER_AGY_SANDBOX_MODE }
+        }
+    }
+    $peerRoots = Resolve-PeerDelegationRoots -Requested $DelegationRoots -Existing @($existingPeerRoots | Where-Object { $_ }) -DefaultRoot $origin
+    $sandboxMode = Resolve-AntigravitySandboxMode -Requested $AntigravitySandboxMode -Existing $existingSandboxModes
+    $peerEnvironment = @{ PEER_AGY_BIN = $agyPath; PEER_CODEX_BIN = $codexPeerPath; PEER_AGENTS_ALLOWED_ROOTS = $peerRoots; PEER_AGY_SANDBOX_MODE = $sandboxMode }
+    Register-CodexMcp -Name 'peer-agents' -Command $nodePath -Arguments @($peerPath) -Environment $peerEnvironment -TimeoutSeconds 1980
     Register-CodexMcp -Name 'graphify' -Command $graphifyPath -Arguments @() -Environment @{} -TimeoutSeconds 120
     Register-CodexMcp -Name 'headroom' -Command $headroomPath -Arguments @('mcp','serve') -Environment @{} -TimeoutSeconds 120
     Register-CodexMcp -Name 'jev' -Command $nodePath -Arguments @($jevPath) -Environment @{} -TimeoutSeconds 120
@@ -359,7 +402,8 @@ if (-not $DryRun -and -not $SkipMcpRegistration) {
     Write-Host '[dry-run/skip] runtime probes were not executed'
 }
 
-Write-Host '7/7 Complete'
+Write-Host '7/7 Setup complete; real Antigravity delegation remains unverified'
+Write-Host 'Verify explicitly with node peer-agents/scripts/doctor-antigravity.mjs --cwd <project> --model <exact-model> --effort <effort> --verify'
 $jevKeyPresent = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('TYPESAFE_API_KEY','User')) -or
     -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('TYPESAFE_API_KEY','Process'))
 [pscustomobject]@{
@@ -369,5 +413,8 @@ $jevKeyPresent = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironment
     headroomProxyHealthy = if($SkipHeadroomProxy -or $DryRun){'not_tested'}else{Test-HeadroomHealth}
     jevCredentialPresent = $jevKeyPresent
     antigravitySafetyEnforced = -not ($DryRun -or $SkipAntigravitySafety)
+    antigravityInspectionGrantsRequested = [bool]$GrantAntigravityInspection
+    antigravityAuthentication = 'UNKNOWN'
+    antigravityDelegation = 'UNVERIFIED'
     restartRequired = -not $DryRun
 } | ConvertTo-Json -Compress
