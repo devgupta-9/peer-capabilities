@@ -116,6 +116,7 @@ def probe(job):
             row["explicit_model_schema"]=data.get("explicitModelSchema",False)
             row["peer_capabilities_checked"]=data.get("peerCapabilitiesChecked",False)
             row["workspace_ready"]=data.get("workspaceReady",False)
+            row["workspace_evidence_scope"]=data.get("workspaceEvidenceScope","unknown")
             row["antigravity_models_available"]=data.get("antigravityModelsAvailable",False)
             row["antigravity_readiness"]=data.get("antigravityReadiness",{"authentication":"UNKNOWN","verification":"UNVERIFIED"})
             row["peer_cli_availability"]={"codex":data.get("codexAvailable",False),"antigravity":data.get("antigravityAvailable",False)}

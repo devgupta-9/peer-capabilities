@@ -35,7 +35,7 @@ Reverse direction uses caller=antigravity and an allowed exact Codex model/effor
 
 ## Safety and limitations
 
-Depth is capped at one through PEER_AGENTS_DEPTH; delegated Codex sessions also disable their own peer-agents MCP, invalid depth values fail closed, and prompts forbid further delegation. Every delegated directory must be a Git repository inside PEER_AGENTS_ALLOWED_ROOTS, or inside the repository that launched the MCP server when no roots are configured.
+Depth is capped at one through PEER_AGENTS_DEPTH; delegated Codex sessions also disable their own peer-agents MCP, invalid depth values fail closed, and prompts forbid further delegation. Both tools use the same WorkspaceAuthorizer: AUTO_ACTIVE accepts the trusted host Git workspace, enrolled projects and explicit roots; STRICT_ROOTS accepts explicit roots only. Sensitive paths override grants. See [workspace policy](../docs/architecture/workspace-authorization.md).
 
 READ_ONLY and REVIEW prohibit file changes. Codex uses its read-only sandbox. Antigravity requests plan mode and normal CLI permission enforcement; slash expansion is not disabled because that would disable plan mode in the tested CLI. OS sandboxing is required unless the user explicitly selects `permissions-only`. Plan mode and Git-status comparisons are not complete read-only enforcement. The bridge does not bypass approval prompts. Permission denial is a real limitation to report.
 
@@ -64,7 +64,7 @@ npm test
 ```
 
 Binary overrides: PEER_CODEX_BIN and PEER_AGY_BIN. The installer supplies absolute executable paths for both. PEER_CODEX_BIN must name a native executable, not a PowerShell or cmd shim.
-Optional policy overrides: PEER_AGENTS_ALLOWED_ROOTS and PEER_AGENTS_POLICY_FILE. The default model exclusion policy is peer-agents/policy.json.
+Optional policy overrides: PEER_AGENTS_ALLOWED_ROOTS (additional explicit scope), PEER_AGENTS_WORKSPACE_MODE (AUTO_ACTIVE or STRICT_ROOTS), PEER_AGENTS_DENIED_ROOTS, and PEER_AGENTS_POLICY_FILE. Root lists use the OS path delimiter. Without a mode, a nonempty legacy allowed-root list remains strict. The default model exclusion policy is peer-agents/policy.json.
 Codex discovery reads models_cache.json from CODEX_HOME when configured, otherwise ~/.codex. Missing or invalid catalogs fail closed; refresh model discovery through Codex before delegating.
 Antigravity discovery runs agy models for fresh selections.
 
@@ -132,7 +132,7 @@ The repaired bridge uses AGY's `--input-format stream-json` / `--output-format s
 
 `PEER_AGY_SANDBOX_MODE` defaults to `required` (`--sandbox`). On a machine that cannot provide AGY's OS sandbox, a user may explicitly select `permissions-only` (`--sandbox=false`). This retains the provider's allow/deny/approval rules but is **not filesystem isolation**. Both discovery and delegation results expose the selected mode; unknown values fail closed, and a failed sandbox never triggers automatic downgrade. The installer accepts `-AntigravitySandboxMode` and otherwise preserves the registered choice, rejecting conflicting host settings. Re-enable `required` after installing and verifying the needed OS support.
 
-- Set `PEER_AGENTS_ALLOWED_ROOTS` in **both** host registrations. An MCP launched by a desktop app may not start inside a Git repository.
+- Use `AUTO_ACTIVE` with a host that supplies MCP workspace roots (or launches the bridge in the active Git repository). Roots and persistent project enrollment are checked per request, so new active projects need no MCP re-registration/restart. A roots-incapable host launched outside Git cannot safely infer its active project from tool arguments; see the workspace-policy limitations. Static roots remain optional explicit scope, not mandatory per-project setup.
 - Antigravity must separately trust the named project and permit its required reads/commands. Preserve Git mutation denials for review. Never solve this by trusting an entire drive or enabling a blanket permission bypass.
 - Windows can require full-line `command(regex:...)` matches and a separate `unsandboxed` grant. The installer's explicit `-GrantAntigravityInspection` option permits only enumerated Git inspection lines (for example, `git status --short`), anchored at both ends for both action types. These provider rules are global, not bound to project directories. Deny/ask rules still take precedence. Shell chains, arbitrary flags, write commands and global `command(*)` / `unsandboxed(*)` are not granted. See the [official permission documentation](https://www.antigravity.google/docs/permissions?tab=cli).
 - Filesystem rules must use supported literal paths such as `read_file(D:\my-project)`, not `read_file(regex:...\\.*)`. The latter can prevent terminal sandbox construction even when a command itself is permitted. Validation flags this configuration error.

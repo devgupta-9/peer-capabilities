@@ -1,5 +1,6 @@
 // Local stdio handshake only: never print raw configuration, env, stderr, prompts, or tool payloads.
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 let request = '';
 for await (const chunk of process.stdin) request += chunk;
@@ -67,6 +68,10 @@ child.stdout.on('data', (chunk) => {
       continue;
     }
 
+    if (message.method === 'roots/list') {
+      send({ id: message.id, result: { roots: spec.workspace ? [{ uri: pathToFileURL(spec.workspace).href }] : [] } });
+      continue;
+    }
     if (message.id === 1) {
       if (message.error || !message.result) {
         finish({ ok: false, error: 'initialize_failed' });
@@ -109,6 +114,7 @@ child.stdout.on('data', (chunk) => {
           antigravityAvailable: payload.antigravity?.available === true,
           antigravityModelsAvailable: payload.antigravity?.models?.length > 0,
           workspaceReady: payload.workspace?.ready === true,
+          workspaceEvidenceScope: 'simulated-probe-host',
           antigravityReadiness: payload.antigravity?.readiness ?? { authentication: 'UNKNOWN', verification: 'UNVERIFIED' },
         });
       } catch {
@@ -123,7 +129,7 @@ send({
   method: 'initialize',
   params: {
     protocolVersion: '2025-03-26',
-    capabilities: {},
+    capabilities: spec.workspace ? { roots: { listChanged: true } } : {},
     clientInfo: { name: 'local-ai-health', version: '1.0.0' },
   },
 });

@@ -7,6 +7,7 @@ param(
     [switch]$SkipAntigravitySafety,
     [switch]$GrantAntigravityInspection,
     [string[]]$DelegationRoots = @(),
+    [ValidateSet('AUTO_ACTIVE', 'STRICT_ROOTS')][string]$WorkspaceAuthorizationMode,
     [ValidateSet('required', 'permissions-only')][string]$AntigravitySandboxMode
 )
 
@@ -359,7 +360,8 @@ if (-not $SkipMcpRegistration) {
     # Registration must not silently lose the project policy during remove/add.
     $existingPeerRoots = @()
     $existingSandboxModes = @()
-    if (-not $DelegationRoots.Count -or -not $AntigravitySandboxMode) {
+    $existingWorkspaceModes = @()
+    if (-not $DelegationRoots.Count -or -not $AntigravitySandboxMode -or -not $WorkspaceAuthorizationMode) {
         $existingCodex = & $codexPath mcp get peer-agents --json 2>$null
         if ($LASTEXITCODE -eq 0 -and $existingCodex) {
             $oldPeer = ($existingCodex -join "`n") | ConvertFrom-Json -AsHashtable
@@ -368,6 +370,7 @@ if (-not $SkipMcpRegistration) {
                 $existingPeerRoots += $oldEnv.PEER_AGENTS_ALLOWED_ROOTS.Split([IO.Path]::PathSeparator)
             }
             if ($oldEnv -and $oldEnv.ContainsKey('PEER_AGY_SANDBOX_MODE')) { $existingSandboxModes += $oldEnv.PEER_AGY_SANDBOX_MODE }
+            $existingWorkspaceModes += Get-PeerRegistrationWorkspaceMode -Environment $oldEnv
         }
         $agyConfig = Read-JsonHashtable (Join-Path $userRoot '.gemini\config\mcp_config.json')
         if ($agyConfig.ContainsKey('mcpServers') -and $agyConfig.mcpServers.ContainsKey('peer-agents')) {
@@ -376,11 +379,15 @@ if (-not $SkipMcpRegistration) {
                 $existingPeerRoots += $oldEnv.PEER_AGENTS_ALLOWED_ROOTS.Split([IO.Path]::PathSeparator)
             }
             if ($oldEnv -and $oldEnv.ContainsKey('PEER_AGY_SANDBOX_MODE')) { $existingSandboxModes += $oldEnv.PEER_AGY_SANDBOX_MODE }
+            $existingWorkspaceModes += Get-PeerRegistrationWorkspaceMode -Environment $oldEnv
         }
     }
-    $peerRoots = Resolve-PeerDelegationRoots -Requested $DelegationRoots -Existing @($existingPeerRoots | Where-Object { $_ }) -DefaultRoot $origin
+    $peerRoots = Resolve-PeerDelegationRoots -Requested $DelegationRoots -Existing @($existingPeerRoots | Where-Object { $_ })
     $sandboxMode = Resolve-AntigravitySandboxMode -Requested $AntigravitySandboxMode -Existing $existingSandboxModes
-    $peerEnvironment = @{ PEER_AGY_BIN = $agyPath; PEER_CODEX_BIN = $codexPeerPath; PEER_AGENTS_ALLOWED_ROOTS = $peerRoots; PEER_AGY_SANDBOX_MODE = $sandboxMode }
+    $workspaceMode = Resolve-PeerWorkspaceMode -Requested $WorkspaceAuthorizationMode -Existing $existingWorkspaceModes -HasExistingRoots ([bool]$existingPeerRoots.Count)
+    Write-Host "Workspace policy mode: $workspaceMode. DelegationRoots is optional explicit scope, not a per-project installation step."
+    if ($workspaceMode -eq 'STRICT_ROOTS') { Write-Host 'Existing restrictive scope retained. AUTO_ACTIVE requires an explicit policy-owner opt-in.' }
+    $peerEnvironment = @{ PEER_AGY_BIN = $agyPath; PEER_CODEX_BIN = $codexPeerPath; PEER_AGENTS_ALLOWED_ROOTS = $peerRoots; PEER_AGY_SANDBOX_MODE = $sandboxMode; PEER_AGENTS_WORKSPACE_MODE = $workspaceMode }
     Register-CodexMcp -Name 'peer-agents' -Command $nodePath -Arguments @($peerPath) -Environment $peerEnvironment -TimeoutSeconds 1980
     Register-CodexMcp -Name 'graphify' -Command $graphifyPath -Arguments @() -Environment @{} -TimeoutSeconds 120
     Register-CodexMcp -Name 'headroom' -Command $headroomPath -Arguments @('mcp','serve') -Environment @{} -TimeoutSeconds 120

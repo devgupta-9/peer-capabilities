@@ -75,7 +75,24 @@ was attempted with an exact model/effort; it was blocked by headless command
 permissions. No global permission settings were changed to obtain review, and no
 independent peer approval is claimed.
 
-## Deferred / next phase
+## Workspace authorization amendment — exit gate
+
+See [workspace authorization](workspace-authorization.md) for trust boundaries,
+migration, operator commands, and the implementation/verification ledger.
+
+- Active Git repositories work without static registration under AUTO_ACTIVE.
+- A roots-capable host can change projects while the same MCP process stays alive;
+  no reinstallation, MCP re-registration or host restart is needed.
+- Additional repositories require enrollment or explicit configured roots.
+- Sensitive paths, physical escapes and replaced trusted identities fail closed.
+- Legacy root-only scopes remain supported and restrictive until explicit opt-in.
+- Preflight and delegation use one canonical-identity policy.
+- Tests must prove same-process host-root changes and enrollment/revocation.
+- Exact-change Windows/macOS/Linux CI and live host evidence are required before
+  declaring the universal product experience complete. Roots-incapable host
+  limitations must not be hidden behind a passing simulated-host test.
+
+## Deferred / next phase (unchanged)
 
 Next: **Identity and Resource Contracts** (Provider, AgentFrontend, Account,
 AuthContextRef, QuotaPool, Model, ModelAccessBinding, Worker, CapabilityProfile,

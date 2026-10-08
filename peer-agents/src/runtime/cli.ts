@@ -11,6 +11,7 @@ import { stateDirectory, repositoryRoot } from './repository.js';
 import { createTaskServer } from './host.js';
 import { assertNonSecret, redact } from '../security.js';
 import { defaultEnvironmentDirectory } from './environment-state.js';
+import { WorkspaceAuthorizer } from '../path-policy.js';
 
 const configSchema = z.object({
   agents: z.array(adapterConfigSchema),
@@ -32,6 +33,7 @@ export async function main(argv: string[]): Promise<void> {
   } });
   const command = positionals[0] ?? 'help';
   if (v.help || command === 'help') {
+    console.log('Projects: project add <absolute-root> | remove <absolute-root> | list | check <absolute-path>\nEnrollment is explicit additional trust, not required for a host-reported active Git workspace.');
     console.log('Peer Capabilities (development; not release-certified)\nCommands: setup doctor update sync repair rollback uninstall version discover verify run resume status mcp\nEnvironment: --manifest FILE --root DIRECTORY [--state-dir DIRECTORY] [--apply]\nTasks: --repo REPOSITORY --config FILE [--objective TEXT] [--id UUID] [--checkpoint-only]\nsetup/update/sync/repair preview changes unless --apply. CLI/MCP integration is disabled pending trusted host approval. Inspect the verified patch for deliberate manual integration. No npm postinstall mutations.');
     return;
   }
@@ -42,6 +44,16 @@ export async function main(argv: string[]): Promise<void> {
   }
   const depth = Number(process.env.PEER_AGENTS_DEPTH ?? 0);
   if (!Number.isSafeInteger(depth) || depth !== 0) throw new Error('Recursive runtime invocation prohibited');
+  if (command === 'project') {
+    const action = positionals[1], target = positionals[2];
+    const policy = new WorkspaceAuthorizer();
+    if (action === 'list') { print({ projects: policy.registry.list() }); return; }
+    if (!target || !path.isAbsolute(target)) throw new Error('project add/remove/check requires an absolute project path');
+    if (action === 'add') { await policy.enroll(target); print({ enrolled: true }); return; }
+    if (action === 'remove') { print({ removed: policy.remove(target) }); return; }
+    if (action === 'check') { const decision = await policy.check(target); print(decision); if (!decision.ready) process.exitCode = 1; return; }
+    throw new Error('Unknown project command; use add, remove, list or check');
+  }
   if (['setup', 'doctor', 'update', 'sync', 'repair', 'rollback', 'uninstall'].includes(command)) {
     if (!v.root) throw new Error('--root is required; no implicit home-directory installation');
     const root = path.resolve(v.root);

@@ -95,7 +95,7 @@ Command grants are **opt-in**: `-GrantAntigravityInspection` adds anchored, enum
 
 ### Peer delegation safety
 
-- Delegation requires a Git repository inside `PEER_AGENTS_ALLOWED_ROOTS`. When that variable is absent, the repository that launched the MCP server is the only allowed root. Multiple explicit roots use the platform path separator (`;` on Windows).
+- Peer Capabilities automatically authorizes the active Git workspace under `AUTO_ACTIVE`. Additional repositories require explicit enrollment or allowed-root configuration; sensitive paths remain denied. `STRICT_ROOTS` preserves restrictive policies. See [workspace authorization and host limitations](docs/architecture/workspace-authorization.md).
 - Both providers receive task prompts through stdin. Antigravity uses its stream-JSON protocol, preserving plan mode without the Windows command-line length limit.
 - Delegated Codex sessions explicitly disable their own `peer-agents` MCP. The depth environment guard and no-recursion prompt remain additional protection.
 - `IMPLEMENT` writes Git's binary patch directly to disk, verifies it with `git apply --check`, hashes it, and only then removes the temporary worktree. Any export or verification failure preserves the worktree and partial patch for recovery.
@@ -103,7 +103,7 @@ Command grants are **opt-in**: `-GrantAntigravityInspection` adds anchored, enum
 
 The Codex exclusion policy is configurable in `peer-agents/policy.json` or through an absolute `PEER_AGENTS_POLICY_FILE` path. There are no capability tiers or silent model substitutions.
 
-For a new project, install with explicit project roots, for example `./install.ps1 -DelegationRoots 'D:\my-project'`. Reinstallation preserves existing roots when this argument is omitted; a fresh installation defaults to the origin repository only. The roots must be specific project folders, not entire drives or user profiles. Configure the corresponding trusted workspace and scoped read permission through Antigravity's settings; do not disable its permission system. Reconnect each host after registration changes.
+Ordinary new projects do not require reinstalling or editing root lists when the host supplies its active workspace. `-DelegationRoots` and `PEER_AGENTS_ALLOWED_ROOTS` are optional explicit cross-project scopes (`;` separated on Windows). Existing roots are preserved; ambiguous legacy root-only installations remain strict until the owner explicitly selects `-WorkspaceAuthorizationMode AUTO_ACTIVE`. Fresh installations select auto mode. Never trust entire drives or user profiles. Antigravity's own workspace/permission checks still apply. Reconnecting may be necessary once to load upgraded bridge code, not for each subsequent project; roots-incapable hosts have the limitations documented above.
 
 Call `peer_capabilities` with the intended `cwd` before delegation: check `workspace.ready`, CLI availability, and `antigravity.modelDiscovery.status`. CLI installation alone does not prove a project is authorized or provider authentication is working. Model discovery permits a bounded 90-second cold startup and caches successful observations for 60 seconds; failures are reported explicitly, without stale-model fallback. See [Antigravity troubleshooting](peer-agents/README.md#antigravity-call-health).
 

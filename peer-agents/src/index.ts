@@ -8,7 +8,8 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
 import { effortSchema, parseCodexCatalog, validateChoice, type ModelChoice } from './model-policy.js';
-import { authorizeWorkingDirectory } from './path-policy.js';
+import { WorkspaceAuthorizer, type WorkspaceDecision } from './path-policy.js';
+import { hostWorkspaceRoots } from './host-workspace.js';
 import { runCapture, truncate } from './process.js';
 import { finalizeImplementationWorktree, type ImplementationPatch } from './worktree.js';
 import { childEnvironment, redact } from './security.js';
@@ -241,6 +242,7 @@ async function runCodex(input: {
 
 
 function createServer(): McpServer {
+  const workspaces = new WorkspaceAuthorizer();
   const server = new McpServer(
     { name: 'peer-agents', version: SERVER_VERSION },
     {
@@ -257,20 +259,18 @@ function createServer(): McpServer {
         'Discover CLI availability, model catalogs, supported reasoning efforts and restrictions without spending a model turn. Catalog listing does not guarantee account access.',
       inputSchema: z.object({ cwd: z.string().optional().describe('Optional project path for a no-model-turn authorization preflight.') }),
     },
-    async ({ cwd }) => {
+    async ({ cwd }, ctx) => {
+      const host = workspaces.mode === 'AUTO_ACTIVE' ? hostWorkspaceRoots(server, ctx) : { roots: undefined };
+      if (host.request) return host.request;
       const [codexVersion, agyVersion, models, catalog] = await Promise.all([
         commandVersion(CODEX_BIN),
         commandVersion(process.env.PEER_AGY_BIN ?? 'agy'),
         agyModels(),
         codexCatalog(),
       ]);
-      let workspace: { ready: boolean; cwd: string; gitRoot?: string; error?: string } | undefined;
+      let workspace: WorkspaceDecision | undefined;
       if (cwd) {
-        try {
-          const authorized = await authorizeWorkingDirectory(cwd);
-          workspace = { ready: true, cwd: authorized.cwd, gitRoot: authorized.gitRoot };
-        }
-        catch (error) { workspace = { ready: false, cwd, error: error instanceof Error ? error.message : String(error) }; }
+        workspace = await workspaces.check(cwd, 'READ_ONLY', host.roots);
       }
       return toolText({
         bridgeVersion: SERVER_VERSION,
@@ -307,7 +307,7 @@ function createServer(): McpServer {
             'Peer works in an isolated temporary Git worktree; the bridge exports a patch under ~/.peer-agents/runs and never applies it automatically.',
         },
         workingDirectoryPolicy:
-          'Delegation requires a Git repository inside PEER_AGENTS_ALLOWED_ROOTS, or inside the repository that launched the MCP server when no roots are configured.',
+          'AUTO_ACTIVE authorizes the trusted host Git workspace and explicitly enrolled/configured additional projects. STRICT_ROOTS preserves restrictive scopes. Sensitive paths are always denied.',
       });
     },
   );
@@ -340,7 +340,7 @@ function createServer(): McpServer {
         timeoutSeconds: z.number().int().min(30).max(MAX_TIMEOUT_SECONDS).default(DEFAULT_TIMEOUT_SECONDS),
       }),
     },
-    async ({ caller, task, cwd, mode, model, effort, selectionReason, deliverable, timeoutSeconds }) => {
+    async ({ caller, task, cwd, mode, model, effort, selectionReason, deliverable, timeoutSeconds }, ctx) => {
       if (DELEGATION_DEPTH >= 1) {
         return toolText(
           {
@@ -353,15 +353,11 @@ function createServer(): McpServer {
       }
 
       const target: AgentName = caller === 'codex' ? 'antigravity' : 'codex';
-      let requestedCwd: string;
-      try {
-        requestedCwd = (await authorizeWorkingDirectory(cwd ?? process.cwd())).cwd;
-      } catch (error) {
-        return toolText(
-          { ok: false, error: error instanceof Error ? error.message : String(error) },
-          true,
-        );
-      }
+      const host = workspaces.mode === 'AUTO_ACTIVE' ? hostWorkspaceRoots(server, ctx) : { roots: undefined };
+      if (host.request) return host.request;
+      const workspace = await workspaces.check(cwd ?? process.cwd(), mode, host.roots);
+      if (!workspace.ready) return toolText({ ok: false, error: workspace.error ?? workspace.reason, workspace }, true);
+      const requestedCwd = workspace.cwd!;
 
       let executionCwd = requestedCwd;
       let isolated:
