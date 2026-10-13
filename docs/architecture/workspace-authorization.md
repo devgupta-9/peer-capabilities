@@ -136,6 +136,33 @@ observing host-root changes plus CLI enrollment/removal.
 - Local verification: typecheck and all 133 bridge/runtime tests passed, alongside
   installer-root tests, sync safety, staged/history secret scans, and package
   dry-run inspection. Both production dependency audits reported no vulnerabilities.
-- Pending: exact-change three-platform CI and live host integration evidence.
+- The 042a20d amendment passed three-platform CI (run 37823713634).
+- Live-install follow-up: Git pushes did not update the separately registered
+  runtime; legacy roots retained strict mode, and discovery hardcoded 0.3.0.
+  Discovery now reports the package version and host workspace support explicitly.
+- A fresh npm artifact previously resolved newer SDK dependencies than the tested
+  checkout. Runtime dependencies are now exact-pinned and the suite installs and
+  exercises the artifact, not only the development tree.
+- Antigravity's early legacy roots-changed notification after modern discovery
+  caused SDK protocol downgrade. The bridge drops only this redundant notification;
+  current roots and revocations are still fetched on every authorization request.
+  Both source and installed-package tests cover this exact handshake ordering.
+- Roots requests include explicit empty params: the
+  [Go MCP decoder](https://github.com/modelcontextprotocol/go-sdk/blob/main/mcp/protocol.go)
+  unmarshals the embedded params even for roots/list. Omitting them produced
+  `unexpected end of JSON input`; strict-client tests reproduce this failure.
+- Real Codex app-server checks passed for two different Git repositories using
+  AUTO_ACTIVE and per-chat server startup cwd, without adding the second root.
+  This does not certify switching cwd inside an already-running roots-incapable
+  connection. Existing processes require a one-time reconnect after code upgrades.
+- Follow-up Windows verification: build and 136 tests passed, including installed
+  package checks. The live Antigravity 1.3.2 preflight tool completed without an
+  error and its final response reported ACTIVE_WORKSPACE/AUTHORIZED for a second
+  repository. Its successful tool payload is not included in CLI stream output;
+  Codex app-server evidence includes the raw structured authorization result.
+- Updated both local host registrations to the installed runtime and AUTO_ACTIVE,
+  preserving explicit roots and permission settings. Config backups precede edits;
+  the diagnostic wrapper was removed. This is a development build, not a release.
+- Pending: fresh three-platform CI for this follow-up (not committed or pushed).
   Provider sandbox enforcement remains an
   independent host capability, not something this cwd policy certifies.

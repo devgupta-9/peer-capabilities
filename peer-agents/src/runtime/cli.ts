@@ -12,6 +12,7 @@ import { createTaskServer } from './host.js';
 import { assertNonSecret, redact } from '../security.js';
 import { defaultEnvironmentDirectory } from './environment-state.js';
 import { WorkspaceAuthorizer } from '../path-policy.js';
+import { PACKAGE_VERSION } from '../version.js';
 
 const configSchema = z.object({
   agents: z.array(adapterConfigSchema),
@@ -37,7 +38,7 @@ export async function main(argv: string[]): Promise<void> {
     console.log('Peer Capabilities (development; not release-certified)\nCommands: setup doctor update sync repair rollback uninstall version discover verify run resume status mcp\nEnvironment: --manifest FILE --root DIRECTORY [--state-dir DIRECTORY] [--apply]\nTasks: --repo REPOSITORY --config FILE [--objective TEXT] [--id UUID] [--checkpoint-only]\nsetup/update/sync/repair preview changes unless --apply. CLI/MCP integration is disabled pending trusted host approval. Inspect the verified patch for deliberate manual integration. No npm postinstall mutations.');
     return;
   }
-  if (command === 'version') { print({ version: '0.4.0-dev.0', node: process.versions.node, maturity: 'development', releaseSupported: false }); return; }
+  if (command === 'version') { print({ version: PACKAGE_VERSION, node: process.versions.node, maturity: 'development', releaseSupported: false }); return; }
   if (command === 'integrate') {
     console.error('Integration is disabled on this surface: a terminal is not proof of human approval. Inspect the verified patch and integrate through an approved host workflow.');
     process.exitCode = 1; return;

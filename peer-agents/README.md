@@ -1,9 +1,10 @@
 # peer-agents
 
-Local MCP bridge for Codex <-> Antigravity CLI. Version 0.3.0.
+Local MCP bridge for Codex <-> Antigravity CLI, inside Peer Capabilities.
 
 The unchanged legacy MCP contract coexists with an experimental Phase-1 task runtime
-(`node bin/peer-capabilities.mjs --help`). The runtime reports 0.4.0-dev.0, is not
+(`node bin/peer-capabilities.mjs --help`). Both surfaces report the installed
+package version (currently 0.4.0-dev.0). This development build is not
 published or certified, and requires Node 24+. See ../docs/runtime-guide.md and
 ../docs/architecture/implementation-status.md before using live adapters.
 
@@ -105,7 +106,18 @@ Existing Antigravity CLI registration is ~/.gemini/config/mcp_config.json:
 }
 ```
 
-Rebuild, then reconnect/restart each host's peer-agents MCP after upgrading. Confirm peer_capabilities reports 0.3.0, both CLIs are available, and delegate_peer exposes model, effort, selectionReason with no tier input. Already-running servers retain their old code/schema. Old callers fail validation instead of receiving an implicit model.
+Rebuild, deploy the npm artifact, then reconnect each host's peer-agents MCP once
+after upgrading. A Git push does not deploy the runtime. Confirm peer_capabilities
+reports the installed package version, both CLIs are available, and delegate_peer
+exposes model, effort, selectionReason with no tier input. Already-running servers
+retain their old code/schema. Old callers fail validation instead of receiving an
+implicit model. `hostWorkspaceSupport` distinguishes `MCP_ROOTS`,
+`STARTUP_CWD_ONLY`, and `STRICT_ROOTS`; version alone does not prove authorization.
+
+Production dependencies are pinned to the tested versions. The suite installs
+the packed npm artifact and checks dependency versions plus both MCP protocol
+paths. Do not replace this with a source-only test: fresh npm installs do not use
+the development checkout's package-lock automatically.
 
 This migration intentionally breaks the old tier-based delegate_peer contract. Old tier-specific model environment variables are no longer used.
 

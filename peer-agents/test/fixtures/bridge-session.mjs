@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export async function bridgeSession(cwd, env, initialRoots, modern = false) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../../dist/index.js', import.meta.url))], {
+export async function bridgeSession(cwd, env, initialRoots, modern = false, entry = fileURLToPath(new URL('../../dist/index.js', import.meta.url)), earlyRootNotice = false) {
+  const child = spawn(process.execPath, [entry], {
     cwd, env: { ...process.env, PEER_AGY_BIN: process.execPath, PEER_CODEX_BIN: process.execPath,
       PEER_AGENTS_ALLOWED_ROOTS: '', PEER_AGENTS_WORKSPACE_MODE: 'AUTO_ACTIVE', ...env },
     windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
@@ -33,7 +33,10 @@ export async function bridgeSession(cwd, env, initialRoots, modern = false) {
   const clientInfo = { name: 'workspace-test-host', version: '1' };
   const meta = { 'io.modelcontextprotocol/protocolVersion': '2026-07-28',
     'io.modelcontextprotocol/clientInfo': clientInfo, 'io.modelcontextprotocol/clientCapabilities': capabilities };
-  if (modern) await request('server/discover', { _meta: meta });
+  if (modern) {
+    await request('server/discover', { _meta: meta });
+    if (earlyRootNotice) send({ method: 'notifications/roots/list_changed' });
+  }
   else {
     await request('initialize', { protocolVersion: '2025-03-26', capabilities, clientInfo });
     send({ method: 'notifications/initialized' });
@@ -47,6 +50,10 @@ export async function bridgeSession(cwd, env, initialRoots, modern = false) {
         const inputResponses = {};
         for (const [key, input] of Object.entries(result.inputRequests ?? {})) {
           if (input.method !== 'roots/list') throw new Error('Unexpected host request');
+          // Go MCP clients unmarshal the embedded params as JSON, including for
+          // roots/list. Missing params is an empty payload, not an empty object.
+          const params = JSON.parse(JSON.stringify(input.params) ?? '');
+          if (!params || typeof params !== 'object') throw new Error('Expected roots request params object');
           inputResponses[key] = { roots: roots.map(root => ({ uri: pathToFileURL(root).href })) };
         }
         result = await request('tools/call', { ...params, inputResponses });

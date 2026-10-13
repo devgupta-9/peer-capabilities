@@ -7,6 +7,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bridgeSession } from './fixtures/bridge-session.mjs';
 
+test('Antigravity root notification immediately after discovery cannot downgrade the modern connection', async () => {
+  const base = await mkdtemp(path.join(tmpdir(), 'peer-agy-roots-'));
+  const repo = path.join(base, 'repo'); let bridge;
+  try {
+    await mkdir(repo); execFileSync('git', ['init', '-q', repo]);
+    bridge = await bridgeSession(base, { PEER_AGENTS_WORKSPACE_REGISTRY: path.join(base, 'control/environment.sqlite') }, [repo], true, undefined, true);
+    const result = await bridge.call('peer_capabilities', { cwd: repo });
+    assert.equal(result.workspace?.ready, true, JSON.stringify(result));
+    assert.equal(result.workspace.authorizationSource, 'HOST_ROOTS');
+    bridge.roots([]);
+    assert.equal((await bridge.call('peer_capabilities', { cwd: repo })).workspace.ready, false, 'Root revocation must still apply');
+  } finally { if (bridge) await bridge.close(); await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
 test('installer probe advertises only its explicit fixture workspace and labels simulated evidence', async () => {
   const base = await mkdtemp(path.join(tmpdir(), 'peer-workspace-probe-'));
   try {

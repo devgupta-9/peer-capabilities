@@ -11,7 +11,9 @@ export function hostWorkspaceRoots(server: McpServer, ctx: ServerContext) {
     ?? server.server.getClientCapabilities();
   if (!capabilities?.roots) return { roots: undefined };
   const response = ctx.mcpReq.inputResponses?.workspaceRoots;
-  if (response === undefined) return { request: inputRequired({ inputRequests: { workspaceRoots: inputRequired.listRoots() } }) };
+  // Go clients decode the embedded params even for parameterless roots/list.
+  // An explicit empty object avoids unmarshalling an absent JSON payload.
+  if (response === undefined) return { request: inputRequired({ inputRequests: { workspaceRoots: { method: 'roots/list', params: {} } } }) };
   // Invalid or refused roots fail closed; never restore startup trust on errors.
   const parsed = rootsSchema.safeParse(response);
   if (!parsed.success) throw new Error('Host returned invalid workspace roots');

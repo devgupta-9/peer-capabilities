@@ -17,8 +17,8 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "^2.0.0",
-    "zod": "^4.0.0"
+    "@modelcontextprotocol/server": "2.0.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -3,9 +3,10 @@ import * as z from 'zod/v4';
 import { redact } from '../security.js';
 import { Runtime } from './runner.js';
 import { TaskStore } from './store.js';
+import { PACKAGE_VERSION } from '../version.js';
 
 export function createTaskServer(runtime: Runtime, store: TaskStore, repository: string): McpServer {
-  const server = new McpServer({ name: 'peer-capabilities', version: '0.4.0-dev.0' });
+  const server = new McpServer({ name: 'peer-capabilities', version: PACKAGE_VERSION });
   const reply = (value: unknown, isError = false) => ({
     content: [{ type: 'text' as const, text: redact(JSON.stringify(value)) }], ...(isError ? { isError: true } : {}),
   });

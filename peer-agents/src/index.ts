@@ -10,6 +10,8 @@ import * as z from 'zod/v4';
 import { effortSchema, parseCodexCatalog, validateChoice, type ModelChoice } from './model-policy.js';
 import { WorkspaceAuthorizer, type WorkspaceDecision } from './path-policy.js';
 import { hostWorkspaceRoots } from './host-workspace.js';
+import { PACKAGE_VERSION } from './version.js';
+import { WorkspaceStdioTransport } from './workspace-stdio.js';
 import { runCapture, truncate } from './process.js';
 import { finalizeImplementationWorktree, type ImplementationPatch } from './worktree.js';
 import { childEnvironment, redact } from './security.js';
@@ -18,7 +20,7 @@ import { antigravitySandboxMode, discoverAntigravityModels, runAntigravity } fro
 type AgentName = 'codex' | 'antigravity';
 type Mode = 'READ_ONLY' | 'REVIEW' | 'IMPLEMENT';
 
-const SERVER_VERSION = '0.3.0';
+const SERVER_VERSION = PACKAGE_VERSION;
 const MAX_TIMEOUT_SECONDS = 1800;
 const DEFAULT_TIMEOUT_SECONDS = 600;
 const parsedMaxTaskChars = Number(process.env.PEER_AGENTS_MAX_TASK_CHARS ?? 24_000);
@@ -274,6 +276,7 @@ function createServer(): McpServer {
       }
       return toolText({
         bridgeVersion: SERVER_VERSION,
+        hostWorkspaceSupport: workspaces.mode === 'STRICT_ROOTS' ? 'STRICT_ROOTS' : host.roots === undefined ? 'STARTUP_CWD_ONLY' : 'MCP_ROOTS',
         invocationProtocol: 'antigravity-stream-json-stdin-v1',
         workspace,
         delegationDepth: DELEGATION_DEPTH,
@@ -487,5 +490,5 @@ function resolveCodexBin(): string {
 
 const CODEX_BIN = resolveCodexBin();
 
-void serveStdio(createServer);
+void serveStdio(createServer, { transport: new WorkspaceStdioTransport() });
 console.error(`[peer-agents] MCP server ${SERVER_VERSION} running on stdio`);
