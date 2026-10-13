@@ -10,6 +10,8 @@ import { validateManifest } from './manifest.js';
 import { assertNonSecret } from '../security.js';
 import * as z from 'zod/v4';
 import type { Observation } from './contracts.js';
+import { ResourceState, type ResourceSnapshot } from './resource-state.js';
+import { ResourceObservations, type ResourceObservation, type ResourceObservationResult } from './resource-observations.js';
 
 type Owned = { id: string; destination: string; hash: string; manifestDigest: string };
 type Operation = { id: string; destination: string; before: string | null; after: string | null; previous: Owned | null; restoreOwnership?: Owned | null };
@@ -62,6 +64,26 @@ export class EnvironmentManager {
     }
     this.db.prepare('INSERT OR IGNORE INTO environment_scope VALUES (1,?)').run(this.root);
     this.db.prepare('INSERT OR IGNORE INTO environment_identity VALUES (1,?)').run(this.identity.key);
+  }
+  readResources(revision?: number): ResourceSnapshot | null {
+    assertIdentity(this.identity);
+    return new ResourceState(this.db).read(revision);
+  }
+  saveResources(catalog: unknown, expectedRevision: number): ResourceSnapshot {
+    assertIdentity(this.identity);
+    return new ResourceState(this.db).save(catalog, expectedRevision);
+  }
+  restoreResources(sourceRevision: number, expectedRevision: number): ResourceSnapshot {
+    assertIdentity(this.identity);
+    return new ResourceState(this.db).restore(sourceRevision, expectedRevision);
+  }
+  recordResourceObservation(value: unknown): ResourceObservation {
+    assertIdentity(this.identity);
+    return new ResourceObservations(this.db).record(value);
+  }
+  getResourceObservation(scope: unknown): ResourceObservationResult {
+    assertIdentity(this.identity);
+    return new ResourceObservations(this.db).read(scope);
   }
   private async destination(relative: string): Promise<string> {
     if (path.isAbsolute(relative) || relative.split(/[\\/]/).some(x => x === '..' || x.includes(':'))) throw new Error('Path escape');

@@ -4,6 +4,11 @@ Current hardening slice: [Phase 0 foundation hardening](phase-0-hardening.md).
 The dated verification below is historical, not a claim that the current HEAD's
 three-platform CI passed. The next approved slice after Phase 0 is Identity and
 Resource Contracts; the earlier next-slice recommendation below is superseded.
+Its [initial increments](identity-resource-contracts.md) now supply validated
+resource metadata, exact capability matching, revisioned environment persistence
+and scoped observations with expiration and configuration-sensitive invalidation.
+Scheduler/adapter consumption of these resource contracts remains pending;
+Phase-0 live-install follow-up CI is also still open.
 
 Updated: 2026-10-03. Status: **unpublished development foundation; roadmap incomplete**.
 Plan: [accepted architecture](phase-1-plan.md). Baseline: `3bce3a4` / v0.3.0,
