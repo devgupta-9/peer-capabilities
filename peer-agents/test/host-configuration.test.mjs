@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { parse } from 'smol-toml';
 import { reconcileHost } from '../dist/host-configuration.js';
 import { HostConfigurationStore } from '../dist/host-configuration-store.js';
+import { directoryIdentity } from '../dist/filesystem-identity.js';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -97,20 +98,27 @@ test('redirected paths and path escapes fail closed without changing outside fil
   assert.throws(() => store.preview([target]), /Redirected/);
   assert.throws(() => store.preview([{ ...target, relativePath: '../escape' }]), /escaped/);
 });
-test('partial apply retains a durable journal and can roll back after process restart', t => {
-  const { root, target, store, file } = fixture(t);
+for (const aliased of [false, true]) test(`partial apply retains a durable journal and can roll back after process restart${aliased ? ' through a root alias' : ''}`, t => {
+  const { root: physicalRoot, target, file } = fixture(t);
+  const root = aliased ? path.join(physicalRoot, 'entry-alias') : physicalRoot;
+  if (aliased) symlinkSync(physicalRoot, root, process.platform === 'win32' ? 'junction' : 'dir');
+  const store = new HostConfigurationStore(root);
   const second = { ...target, host: 'second', relativePath: 'second.json', format: 'mcp-json' };
   writeFileSync(file, '# original\n');
   writeFileSync(path.join(root, 'second.json'), '{"unrelated":true}\n');
   const plan = store.preview([target, second]);
+  // The store writes canonical paths (e.g. /private/var on macOS), not caller aliases.
+  const secondDestination = path.join(directoryIdentity(root).canonicalPath, 'second.json');
+  let interrupted = false;
   const rename = fs.renameSync;
   fs.renameSync = (source, destination) => {
-    if (destination === path.join(root, 'second.json')) throw new Error('Injected interruption');
+    if (destination === secondDestination) { interrupted = true; throw new Error('Injected interruption'); }
     return rename(source, destination);
   };
   syncBuiltinESMExports();
   try { assert.throws(() => store.apply([target, second], plan.digest), /incomplete/); }
   finally { fs.renameSync = rename; syncBuiltinESMExports(); }
+  assert.equal(interrupted, true, 'The simulated interruption must actually occur');
   assert.notEqual(readFileSync(file, 'utf8'), '# original\n');
   const db = new DatabaseSync(path.join(root, '.peer-capabilities/host-configuration/environment.sqlite'));
   const record = JSON.parse(db.prepare('SELECT body FROM host_configuration_operations').get().body);

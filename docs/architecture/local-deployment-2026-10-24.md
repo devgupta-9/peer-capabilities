@@ -72,3 +72,15 @@ Do not run mixed task-runtime versions against resource-bearing task state.
 
 Remaining roadmap: trusted scoped collectors, resource-aware doctor inspection,
 live provider/account certification, and the staged Technical Preview gates.
+
+## CI follow-up
+
+The first pushed run at `27c014b` passed Linux but exposed the same recovery-test
+fault-injection error on macOS and Windows: the test compared an alias path with
+the runtime's canonical destination, so its simulated interruption never occurred.
+An explicit root-alias case reproduced the failure locally. The test now resolves
+its injection target through the existing filesystem identity primitive and asserts
+that the interruption actually happened; both cases retain journal/restart/rollback
+assertions. The focused recovery suite passes 11/11 and the final full Windows
+suite passes 199/199. No runtime or security-policy
+code changed, so the deployed artifact and its verified hashes remain unchanged.
