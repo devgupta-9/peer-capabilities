@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$Probe, [switch]$StrictSecurity)
+param([switch]$Probe, [switch]$StrictSecurity, [string]$RuntimeRoot, [string]$JevEntry, [string]$ReaEntry, [string]$Hosts)
 $ErrorActionPreference = 'Stop'
 $origin = Split-Path -Parent $PSScriptRoot
 $uv = Get-Command uv -ErrorAction Stop
@@ -10,5 +10,8 @@ if (-not (Test-Path -LiteralPath $python)) { throw 'Installed Headroom Python is
 $arguments = @((Join-Path $PSScriptRoot 'validate.py'))
 if ($Probe) { $arguments += '--probe' }
 if ($StrictSecurity) { $arguments += '--strict-security' }
+foreach ($pair in @(@('--runtime-root',$RuntimeRoot),@('--jev-entry',$JevEntry),@('--rea-entry',$ReaEntry),@('--hosts',$Hosts))) {
+    if ($pair[1]) { $arguments += $pair }
+}
 & $python @arguments
 exit $LASTEXITCODE

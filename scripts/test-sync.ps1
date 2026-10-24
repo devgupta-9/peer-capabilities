@@ -18,6 +18,7 @@ $script = Join-Path $PSScriptRoot 'sync.ps1'
 function Invoke-Sync([bool]$Apply, [int]$ExpectedExit) {
     $invokeArgs = @('-NoProfile','-File',$script,'-Origin',$source,'-HomeRoot',$live,'-BackupRoot',$backups)
     if ($Apply) { $invokeArgs += '-Apply' }
+    $invokeArgs += '-IncludeClaude'
     $result = & pwsh @invokeArgs 2>&1
     if ($LASTEXITCODE -ne $ExpectedExit) { throw "Unexpected sync exit code $LASTEXITCODE, expected $ExpectedExit" }
     return $result
@@ -25,6 +26,7 @@ function Invoke-Sync([bool]$Apply, [int]$ExpectedExit) {
 # Missing targets are drift, then deployment is idempotent.
 $null = Invoke-Sync $false 1
 $null = Invoke-Sync $true 0
+if (-not (Test-Path -LiteralPath (Join-Path $live '.claude\CLAUDE.md'))) { throw 'Claude bootstrap was not deployed.' }
 $null = Invoke-Sync $false 0
 $null = Invoke-Sync $true 0
 # Independent edits must survive an attempted apply.

@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 2,
-  "tokens": ["${ORIGIN}", "${NODE_BIN}", "${AGY_BIN}", "${CODEX_PEER_BIN}", "${UV_BIN}"],
+  "schemaVersion": 3,
+  "tokens": ["${ORIGIN}", "${PEER_RUNTIME}", "${NODE_BIN}", "${AGY_BIN}", "${CODEX_PEER_BIN}", "${UV_BIN}", "${POWERSHELL_BIN}", "${JEV_ENTRY}", "${REA_ENTRY}"],
   "sharedServers": {
     "peer-agents": {
       "command": "${NODE_BIN}",
-      "args": ["${ORIGIN}\\peer-agents\\dist\\index.js"],
+      "args": ["${PEER_RUNTIME}\\dist\\index.js"],
       "env": {"PEER_AGY_BIN": "${AGY_BIN}", "PEER_CODEX_BIN": "${CODEX_PEER_BIN}"}
     },
     "graphify": {
@@ -16,10 +16,23 @@
       "args": ["mcp", "serve"]
     },
     "jev": {
+      "command": "${POWERSHELL_BIN}",
+      "args": ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", "${PEER_RUNTIME}\\scripts\\start-jev.ps1", "-NodePath", "${NODE_BIN}", "-EntryPath", "${JEV_ENTRY}"]
+    },
+    "rea": {
       "command": "${NODE_BIN}",
-      "args": ["${ORIGIN}\\tools\\jev\\node_modules\\@jkudish\\jev-mcp\\dist\\index.js"]
+      "args": ["${REA_ENTRY}", "mcp"]
     }
   },
+  "hosts": {
+    "codex": ["peer-agents", "graphify", "headroom", "jev", "rea"],
+    "antigravity-cli": ["peer-agents", "graphify", "headroom", "jev", "rea"],
+    "antigravity-ide": ["peer-agents", "graphify", "headroom", "jev", "rea"],
+    "claude-code": ["graphify", "headroom", "jev", "rea"],
+    "claude-desktop": ["graphify", "headroom", "jev", "rea"]
+  },
+  "credentialEnvironment": { "jev": ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "JEV_CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"] },
+  "optionalServers": ["rea"],
   "antigravityReview": {
     "artifactReviewMode": "ARTIFACT_REVIEW_MODE_ALWAYS",
     "autoExecutionPolicy": "CASCADE_COMMANDS_AUTO_EXECUTION_OFF",

@@ -2,8 +2,20 @@
   "name": "@devgupta/peer-capabilities",
   "version": "0.4.0-dev.0",
   "private": true,
-  "bin": { "peer-capabilities": "bin/peer-capabilities.mjs" },
-  "files": ["bin/", "dist/", "security-policy.mjs", "policy.json", "examples/", "README.md", "scripts/doctor-antigravity.mjs", "scripts/mcp-call.mjs"],
+  "bin": {
+    "peer-capabilities": "bin/peer-capabilities.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "security-policy.mjs",
+    "policy.json",
+    "examples/",
+    "README.md",
+    "scripts/doctor-antigravity.mjs",
+    "scripts/mcp-call.mjs",
+    "scripts/start-jev.ps1"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -17,8 +29,9 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.0.0",
-    "zod": "4.6.5"
+    "@modelcontextprotocol/server": "2.3.0",
+    "smol-toml": "1.9.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

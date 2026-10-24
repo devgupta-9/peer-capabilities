@@ -1,14 +1,39 @@
 """Timestamped, secret-free inventory; never serialize raw host configurations."""
 from __future__ import annotations
-import argparse, concurrent.futures, datetime, hashlib, json, os, pathlib, shutil, subprocess, sys, tomllib, urllib.request
+import argparse, concurrent.futures, contextlib, datetime, hashlib, json, os, pathlib, shutil, sqlite3, subprocess, sys, tomllib, urllib.request
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 USER = pathlib.Path.home()
 parser = argparse.ArgumentParser()
 parser.add_argument("--probe", action="store_true")
 parser.add_argument("--strict-security", action="store_true")
+parser.add_argument("--runtime-root", type=pathlib.Path)
+parser.add_argument("--jev-entry", type=pathlib.Path)
+parser.add_argument("--rea-entry", type=pathlib.Path)
+parser.add_argument("--hosts", default="codex,antigravity-cli")
 args = parser.parse_args()
+selected = set(args.hosts.split(","))
+known_hosts = {"codex", "antigravity-cli", "antigravity-ide", "claude-code", "claude-desktop"}
+if not selected or not selected <= known_hosts:
+    parser.error("--hosts must name supported host scopes")
+agy_selected = bool(selected & {"antigravity-cli", "antigravity-ide"})
 errors: list[str] = []
 warnings: list[str] = []
+bindings={}
+ledger=USER/".peer-capabilities/host-configuration/environment.sqlite"
+if ledger.is_file():
+    try:
+        with contextlib.closing(sqlite3.connect(ledger.as_uri()+"?mode=ro",uri=True)) as db:
+            for (body,) in db.execute("SELECT body FROM host_configuration_operations ORDER BY rowid DESC"):
+                operation=json.loads(body)
+                if operation.get("version") != 1: raise ValueError("Unknown host ledger version")
+                if operation.get("status")=="COMPLETE":
+                    for host,components in operation.get("bindings",{}).items():
+                        if host not in known_hosts or not isinstance(components,dict): continue
+                        for component,locations in components.items():
+                            if component not in ("peer-agents","jev","rea") or not isinstance(locations,dict): continue
+                            if all(key in ("runtimeRoot","entry") and isinstance(value,str) and pathlib.Path(value).is_absolute() for key,value in locations.items()):
+                                bindings.setdefault(host,{}).setdefault(component,locations)
+    except Exception: warnings.append("Deployment bindings could not be read; explicit runtime paths may be needed")
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest().upper() if path.is_file() else None
 def read_json(path):
@@ -51,13 +76,39 @@ replacements = {
     "${AGY_BIN}": shutil.which("agy") or "agy",
     "${CODEX_PEER_BIN}": shutil.which("codex.exe") or shutil.which("codex") or "codex",
     "${UV_BIN}": uv_bin_dir(),
+    "${PEER_RUNTIME}": str(args.runtime_root or ROOT/"peer-agents"),
+    "${POWERSHELL_BIN}": shutil.which("pwsh") or "pwsh",
+    "${JEV_ENTRY}": str(args.jev_entry or ROOT/"tools/jev/node_modules/@jkudish/jev-mcp/dist/index.js"),
+    "${REA_ENTRY}": str(args.rea_entry or ROOT/"tools/rea/node_modules/rea-agents/scripts/rea.mjs"),
 }
-expected = expand_tokens(read_json(ROOT / "integrations.json"), replacements)
-codex = safe_load("Codex", USER / ".codex/config.toml", True)
-agy = safe_load("Antigravity MCP", USER / ".gemini/config/mcp_config.json")
-settings = safe_load("Antigravity settings", USER / ".gemini/config/config.json", required=args.strict_security)
-cli = safe_load("Antigravity CLI", USER / ".gemini/antigravity-cli/settings.json", required=args.strict_security)
-hosts = {"codex": codex.get("mcp_servers", {}), "antigravity": agy.get("mcpServers", {})}
+manifest = read_json(ROOT / "integrations.json")
+expected = expand_tokens(manifest, replacements)
+def expected_server(host, name):
+    tokens = dict(replacements)
+    locations = bindings.get(host,{}).get(name,{})
+    if not args.runtime_root and "runtimeRoot" in locations: tokens["${PEER_RUNTIME}"]=locations["runtimeRoot"]
+    if name=="jev" and not args.jev_entry and "entry" in locations: tokens["${JEV_ENTRY}"]=locations["entry"]
+    if name=="rea" and not args.rea_entry and "entry" in locations: tokens["${REA_ENTRY}"]=locations["entry"]
+    return expand_tokens(manifest["sharedServers"][name],tokens)
+def load_host(label, file, host, is_toml=False):
+    return safe_load(label, file, is_toml, required=host in selected) if file.is_file() or host in selected else {}
+codex = load_host("Codex", USER / ".codex/config.toml", "codex", True)
+agy = load_host("Antigravity MCP", USER / ".gemini/config/mcp_config.json", "antigravity-cli")
+settings = safe_load("Antigravity settings", USER / ".gemini/config/config.json", required=args.strict_security) if agy_selected else {}
+cli = safe_load("Antigravity CLI", USER / ".gemini/antigravity-cli/settings.json", required=args.strict_security) if agy_selected else {}
+host_paths = {
+    "antigravity-ide": USER / ".gemini/antigravity/mcp_config.json",
+    "claude-code": USER / ".claude.json",
+}
+desktop_candidates = [USER / "AppData/Roaming/Claude/claude_desktop_config.json"] + list((USER / "AppData/Local/Packages").glob("Claude_*/LocalCache/Roaming/Claude/claude_desktop_config.json"))
+desktop_found = [p for p in desktop_candidates if p.is_file()]
+if len(desktop_found) == 1: host_paths["claude-desktop"] = desktop_found[0]
+elif len(desktop_found) > 1: warnings.append("Claude Desktop: multiple configurations; select the intended app explicitly")
+hosts = {"codex": codex.get("mcp_servers", {}), "antigravity-cli": agy.get("mcpServers", {})}
+for host, file in host_paths.items():
+    if file.is_file() or host in selected:
+        hosts[host] = safe_load(host, file, required=host in selected).get("mcpServers", {})
+for host in selected - set(hosts): errors.append(f"{host}: host configuration is not available")
 report = {
     "observed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "scope": "Local configuration and fresh-process tool discovery; remote authentication and existing sessions not tested.",
@@ -84,25 +135,35 @@ for host, plugins in (("codex",codex.get("plugins",{})),("antigravity",settings.
 jobs=[]
 for host, servers in hosts.items():
     report["shared_tools"][host]={}
-    for name, want in expected["sharedServers"].items():
+    for name in expected["hosts"][host]:
+        want=expected_server(host,name)
         actual=servers.get(name,{})
         enabled=actual.get("enabled",True) if host=="codex" else not actual.get("disabled",False)
         matches = bool(actual) and same_value(str(actual.get("command","")), want["command"]) and same_value(actual.get("args",[]), want["args"])
         for key,value in want.get("env",{}).items():
-            matches = matches and same_value(actual.get("env",{}).get(key), value)
+            # Manifest env entries are defaults. Reconciliation preserves established host overrides.
+            configured_value=actual.get("env",{}).get(key)
+            matches = matches and bool(configured_value)
+            if key.endswith("_BIN"): matches = matches and pathlib.Path(str(configured_value)).is_file()
         command=want["command"]
         installed=bool(shutil.which(command) or pathlib.Path(command).is_file())
-        if want.get("args") and pathlib.Path(want["args"][0]).is_absolute():
-            installed=installed and pathlib.Path(want["args"][0]).is_file()
+        for arg in want.get("args",[]):
+            if pathlib.Path(arg).is_absolute(): installed=installed and pathlib.Path(arg).is_file()
         row={"configured":bool(actual),"enabled":bool(enabled),"matches_expected":bool(matches),"installed":installed,"discovered":"not_tested","loaded_in_session":"not_tested"}
         report["shared_tools"][host][name]=row
-        if not (matches and enabled and installed): errors.append(f"{host}/{name}: registration mismatch, disabled, or executable missing")
-        if args.probe and matches and enabled and installed: jobs.append((host,name,actual,row))
+        required=host in selected and name not in expected.get("optionalServers",[])
+        if not enabled:
+            warnings.append(f"{host}/{name}: intentionally disabled; setup will not enable it implicitly")
+        elif not (matches and installed):
+            (errors if required else warnings).append(f"{host}/{name}: not aligned or not installed")
+        if args.probe and host in selected and actual and enabled:
+            jobs.append((host,name,actual,row))
 def probe(job):
     host,name,actual,row=job
     try:
         env=actual.get("env",{})
-        spec={"command":actual["command"],"args":actual.get("args",[]),"env":env,"cwd":str(ROOT)}
+        spec={"command":actual["command"],"args":actual.get("args",[]),"env":env,"env_vars":actual.get("env_vars",[]),"cwd":str(ROOT)}
+        if name=="rea": spec["maxOutputBytes"]=16_000_000  # Its full 207-tool catalog exceeds the default bound.
         roots=env.get("PEER_AGENTS_ALLOWED_ROOTS", "").split(os.pathsep)
         if name=="peer-agents":
             spec["workspace"]=roots[0] or str(ROOT)
@@ -118,6 +179,7 @@ def probe(job):
             row["workspace_ready"]=data.get("workspaceReady",False)
             row["workspace_evidence_scope"]=data.get("workspaceEvidenceScope","unknown")
             row["antigravity_models_available"]=data.get("antigravityModelsAvailable",False)
+            row["antigravity_discovery"]=data.get("antigravityDiscovery",{})
             row["antigravity_readiness"]=data.get("antigravityReadiness",{"authentication":"UNKNOWN","verification":"UNVERIFIED"})
             row["peer_cli_availability"]={"codex":data.get("codexAvailable",False),"antigravity":data.get("antigravityAvailable",False)}
         peer_ok=name!="peer-agents" or (
@@ -126,18 +188,29 @@ def probe(job):
             and data.get("antigravityModelsAvailable") and data.get("workspaceReady")
         )
         if not data.get("ok") or not peer_ok:
+            if name=="peer-agents" and data.get("antigravityDiscovery"):
+                discovery=data["antigravityDiscovery"]
+                return f"{host}/{name}: MCP probe failed (Antigravity CLI={discovery.get('cli', 'UNKNOWN')}, catalog={discovery.get('catalog', 'UNKNOWN')})"
             return f"{host}/{name}: MCP probe failed"
     except Exception:
         row["discovered"]=False
         return f"{host}/{name}: MCP probe could not complete (diagnostics withheld)"
+# AGY's catalog command also starts provider/MCP services. Do not amplify cold startup
+# by probing several host registrations concurrently, or alongside the other MCPs.
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-    for problem in pool.map(probe,jobs):
+    for problem in pool.map(probe,[job for job in jobs if job[1] != 'peer-agents']):
+        if problem: errors.append(problem)
+for job in jobs:
+    if job[1] == 'peer-agents':
+        problem = probe(job)
         if problem: errors.append(problem)
 # Enumerate current sources as well as recorded deployments so new files cannot hide.
 source_pairs=[
     (ROOT/"platforms/codex/AGENTS.md", USER/".codex/AGENTS.md"),
     (ROOT/"platforms/antigravity/GEMINI.md", USER/".gemini/GEMINI.md"),
 ]
+if (USER/".claude/CLAUDE.md").is_file():
+    source_pairs.append((ROOT/"platforms/claude/CLAUDE.md",USER/".claude/CLAUDE.md"))
 for source in (ROOT/"orchestrator").rglob("*"):
     if source.is_file(): source_pairs.append((source,USER/".ai-orchestrator"/source.relative_to(ROOT/"orchestrator")))
 if (ROOT/"skills").is_dir():
@@ -155,7 +228,7 @@ else:
         if entry["target"] not in current_targets: errors.append("An old managed source was removed; review its live target explicitly")
 if report["drift"]: errors.append(f'{len(report["drift"])} managed files differ from their sources')
 if (USER/".gemini/config/AGENTS.md").exists(): errors.append("Duplicate Antigravity global AGENTS.md is present")
-for key,value in expected["antigravityReview"].items():
+for key,value in (expected["antigravityReview"] if agy_selected else {}).items():
     okay=settings.get("userSettings",{}).get(key)==value
     report["security"][key]={"matches_expected":okay}
     if not okay: (errors if args.strict_security else warnings).append(f"Antigravity review setting drift: {key}")
@@ -165,12 +238,24 @@ report["security"]["broad_cli_trust_absent"]=not any(str(p).rstrip("\\").casefol
 if not report["security"]["broad_cli_trust_absent"]: (errors if args.strict_security else warnings).append("Antigravity CLI still trusts a broad user/system/drive root")
 required_deny=r'command(regex:\bgit(?:\.exe)?\s+.*\b(push|pull|fetch|merge|rebase|checkout|switch|reset|restore|stash|clean|commit|add|rm|mv)\b.*)'
 report["security"]["cli_mutating_git_deny_present"]=required_deny in cli.get("permissions",{}).get("deny",[])
-if not report["security"]["cli_mutating_git_deny_present"]: (errors if args.strict_security else warnings).append("CLI mutating Git deny rule missing")
+if agy_selected and not report["security"]["cli_mutating_git_deny_present"]: (errors if args.strict_security else warnings).append("CLI mutating Git deny rule missing")
 filesystem_rules=[rule for rule in cli.get("permissions",{}).get("allow",[]) if isinstance(rule,str)]
 if any(rule.startswith(("read_file(regex:","write_file(regex:")) for rule in filesystem_rules):
     errors.append("Antigravity filesystem rules use unsupported regex syntax; use literal directory/file paths before invoking the terminal sandbox")
 report["managed_files"]=len(source_pairs)
 report["headroom_proxy"]={"health":"not_tested","session_routing":"not_verified"}
+report["project_graph"]={"present":(ROOT/"graphify-out/graph.json").is_file(),"freshness":"not_verified"}
+report["jev"]={"credential_present":"not_tested","authentication":"UNKNOWN","functional_verification":"UNVERIFIED"}
+if args.probe:
+    try:
+        jev_host=next((host for host in sorted(selected) if "jev" in expected["hosts"][host]), None)
+        if jev_host is None: raise ValueError("No selected Jev scope")
+        jev_args=expected_server(jev_host,"jev")["args"]
+        launcher=jev_args[jev_args.index("-File")+1]
+        check=subprocess.run([replacements["${POWERSHELL_BIN}"],"-NoProfile","-File",launcher,"-Check"],capture_output=True,text=True,timeout=15)
+        report["jev"]["credential_present"]=bool(json.loads(check.stdout).get("credentialPresent")) if check.returncode==0 else "not_tested"
+        if report["jev"]["credential_present"] is False: warnings.append("Jev: official provider credential required; installation is not authentication")
+    except Exception: warnings.append("Jev: credential presence could not be checked; contents withheld")
 if args.probe:
     try:
         with urllib.request.urlopen("http://127.0.0.1:8787/health", timeout=5) as response:

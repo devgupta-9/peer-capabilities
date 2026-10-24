@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$Apply,
+    [switch]$IncludeClaude,
     [string]$Origin = (Split-Path -Parent $PSScriptRoot),
     [string]$HomeRoot = [Environment]::GetFolderPath('UserProfile'),
     [string]$BackupRoot = (Join-Path ([Environment]::GetFolderPath('UserProfile')) '.ai-rules-backups')
@@ -28,6 +29,10 @@ function Add-Deployment([string]$Source, [string]$Target) {
 }
 Add-Deployment (Join-Path $origin 'platforms\codex\AGENTS.md') (Join-Path $HomeRoot '.codex\AGENTS.md')
 Add-Deployment (Join-Path $origin 'platforms\antigravity\GEMINI.md') (Join-Path $HomeRoot '.gemini\GEMINI.md')
+$claudeTarget = Join-Path $HomeRoot '.claude\CLAUDE.md'
+if ($IncludeClaude -or $previous.ContainsKey($claudeTarget)) {
+    Add-Deployment (Join-Path $origin 'platforms\claude\CLAUDE.md') $claudeTarget
+}
 foreach ($f in Get-ChildItem -LiteralPath (Join-Path $origin 'orchestrator') -File -Recurse) {
     $relative = [IO.Path]::GetRelativePath((Join-Path $origin 'orchestrator'), $f.FullName)
     Add-Deployment $f.FullName (Join-Path (Join-Path $HomeRoot '.ai-orchestrator') $relative)

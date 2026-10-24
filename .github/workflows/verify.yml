@@ -48,6 +48,7 @@ jobs:
           cache-dependency-path: |
             peer-agents/package-lock.json
             tools/jev/package-lock.json
+            tools/rea/package-lock.json
       - name: Secret scan — current content
         run: node scripts/secret-scan.mjs
       - name: Secret scan — fetched reachable history
@@ -68,6 +69,8 @@ jobs:
           if ($failed) { exit 1 }
       - name: Validate Python syntax
         run: python -m py_compile scripts/validate.py
+      - name: Test doctor host isolation
+        run: python -m unittest discover -s scripts -p test_validate.py
       - name: Validate Node syntax
         run: node --check scripts/probe.mjs
       - name: Validate dependency locks and inventory
@@ -116,4 +119,10 @@ jobs:
         run: npm ci --omit=dev --ignore-scripts
       - name: Audit Jev runtime dependencies
         working-directory: tools/jev
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install optional REA runtime dependencies
+        working-directory: tools/rea
+        run: npm ci --omit=dev --ignore-scripts
+      - name: Audit optional REA runtime dependencies
+        working-directory: tools/rea
         run: npm audit --omit=dev --audit-level=high

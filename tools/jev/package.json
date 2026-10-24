@@ -5,6 +5,6 @@
   "description": "Pinned runtime for the maintained Jev MCP server.",
   "license": "UNLICENSED",
   "dependencies": {
-    "@jkudish/jev-mcp": "0.5.0"
+    "@jkudish/jev-mcp": "0.14.5"
   }
 }

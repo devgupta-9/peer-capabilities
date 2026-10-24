@@ -1,8 +1,10 @@
 // Local stdio handshake only: never print raw configuration, env, stderr, prompts, or tool payloads.
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { StringDecoder } from 'node:string_decoder';
 
 let request = '';
+process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) request += chunk;
 
 let spec;
@@ -12,12 +14,20 @@ try {
   console.log(JSON.stringify({ ok: false, error: 'invalid_input' }));
   process.exit(1);
 }
+const maxOutputBytes = spec.maxOutputBytes ?? 2_000_000;
+if (!Number.isInteger(maxOutputBytes) || maxOutputBytes < 1 || maxOutputBytes > 16_000_000) {
+  console.log(JSON.stringify({ ok: false, error: 'invalid_output_limit' }));
+  process.exit(1);
+}
 
+const systemKeys = new Set(['PATH','PATHEXT','SYSTEMROOT','WINDIR','COMSPEC','HOME','USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP','TMPDIR','LANG','LC_ALL']);
+const childEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => systemKeys.has(name.toUpperCase()) || (spec.env_vars ?? []).includes(name)));
 const child = spawn(spec.command, spec.args ?? [], {
   cwd: spec.cwd,
-  env: { ...process.env, ...(spec.env ?? {}) },
+  env: { ...childEnv, ...(spec.env ?? {}) },
   shell: false,
   windowsHide: true,
+  detached: process.platform !== 'win32',
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 
@@ -26,16 +36,28 @@ let buffer = '';
 let bytes = 0;
 let stderrBytes = 0;
 let names = [];
+const decoder = new StringDecoder('utf8');
 let explicitModelSchema = false;
+let shutdownTimer;
 const timer = setTimeout(() => finish({ ok: false, error: 'timeout' }), 110_000);
 
 function finish(result) {
   if (finished) return;
   finished = true;
   clearTimeout(timer);
-  child.kill();
+  child.stdin.end();
+  // Give launchers time to close their children on EOF before terminating the owned tree.
+  if (child.pid && child.exitCode === null) shutdownTimer = setTimeout(() => {
+    if (process.platform === 'win32') {
+      const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
+      killer.on('error', () => child.kill());
+    } else {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already exited */ }
+    }
+  }, 2000);
   console.log(JSON.stringify(result));
 }
+child.on('close', () => clearTimeout(shutdownTimer));
 
 function send(message) {
   if (!finished) child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', ...message })}\n`);
@@ -52,11 +74,11 @@ child.stderr.on('data', (chunk) => {
 });
 child.stdout.on('data', (chunk) => {
   bytes += chunk.length;
-  if (bytes > 2_000_000) {
+  if (bytes > maxOutputBytes) {
     finish({ ok: false, error: 'excessive_output' });
     return;
   }
-  buffer += chunk;
+  buffer += decoder.write(chunk);
   let newline;
   while ((newline = buffer.indexOf('\n')) >= 0) {
     const line = buffer.slice(0, newline);
@@ -91,11 +113,20 @@ child.stdout.on('data', (chunk) => {
       explicitModelSchema = Boolean(delegate)
         && ['model', 'effort', 'selectionReason'].every((key) => delegate.inputSchema.required?.includes(key))
         && !('tier' in delegate.inputSchema.properties);
-      if (names.includes('peer_capabilities')) {
+      if (spec.verify) {
+        if (!names.includes(spec.verify.name)) { finish({ ok: false, error: 'verification_tool_missing' }); return; }
+        send({ id: 4, method: 'tools/call', params: { name: spec.verify.name, arguments: spec.verify.arguments ?? {} } });
+      } else if (names.includes('peer_capabilities')) {
         send({ id: 3, method: 'tools/call', params: { name: 'peer_capabilities', arguments: { cwd: spec.workspace ?? spec.cwd } } });
       } else {
         finish({ ok: true, tools: names, explicitModelSchema });
       }
+    }
+
+    if (message.id === 4) {
+      const verified = Boolean(message.result) && !message.error && !message.result?.isError;
+      finish({ ok: verified, tools: names, functionalCall: spec.verify.name, functionalVerified: verified,
+        scope: 'fresh-process single tool call, not active-host or all-backend certification' });
     }
 
     if (message.id === 3) {
@@ -113,6 +144,12 @@ child.stdout.on('data', (chunk) => {
           codexAvailable: payload.codex?.available === true,
           antigravityAvailable: payload.antigravity?.available === true,
           antigravityModelsAvailable: payload.antigravity?.models?.length > 0,
+          antigravityDiscovery: {
+            cli: payload.antigravity?.cliDiscovery?.status ?? 'UNKNOWN',
+            cliDurationMs: payload.antigravity?.cliDiscovery?.durationMs ?? null,
+            catalog: payload.antigravity?.modelDiscovery?.status ?? 'UNKNOWN',
+            catalogDurationMs: payload.antigravity?.modelDiscovery?.durationMs ?? null,
+          },
           workspaceReady: payload.workspace?.ready === true,
           workspaceEvidenceScope: 'simulated-probe-host',
           antigravityReadiness: payload.antigravity?.readiness ?? { authentication: 'UNKNOWN', verification: 'UNVERIFIED' },

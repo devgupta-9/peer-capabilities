@@ -6,6 +6,7 @@ param(
     [switch]$SkipHeadroomProxy,
     [switch]$SkipAntigravitySafety,
     [switch]$GrantAntigravityInspection,
+    [switch]$IncludeRea,
     [string[]]$DelegationRoots = @(),
     [ValidateSet('AUTO_ACTIVE', 'STRICT_ROOTS')][string]$WorkspaceAuthorizationMode,
     [ValidateSet('required', 'permissions-only')][string]$AntigravitySandboxMode
@@ -296,6 +297,9 @@ $nodeVersion = (& $nodePath --version).TrimStart('v')
 if ($LASTEXITCODE -ne 0 -or [int]($nodeVersion.Split('.')[0]) -lt 24) {
     throw "Node.js 24 or newer is required; found $nodeVersion"
 }
+if ($IncludeRea -and -not (([version]$nodeVersion -ge [version]'24.11.0' -and [version]$nodeVersion -lt [version]'25.0.0') -or [version]$nodeVersion -ge [version]'26.0.0')) {
+    throw 'Optional REA 6.5.0 requires Node 24.11+ within Node 24, or Node 26+. No runtime will be auto-upgraded.'
+}
 
 Write-Host '1/7 Auditing publishable sources'
 Invoke-Checked (Resolve-Tool 'pwsh') @('-NoProfile','-File',(Join-Path $origin 'scripts\secret-scan.ps1'))
@@ -316,6 +320,11 @@ if (-not $SkipToolInstall) {
         Invoke-Checked $npmPath @('ci','--omit=dev','--ignore-scripts')
     } finally {
         Pop-Location
+    }
+    if ($IncludeRea) {
+        Push-Location (Join-Path $origin 'tools\rea')
+        try { Invoke-Checked $npmPath @('ci','--omit=dev','--ignore-scripts') }
+        finally { Pop-Location }
     }
     Ensure-UvTool 'graphifyy' '0.9.63' 'graphifyy[mcp]==0.9.63' (Join-Path $origin 'tools\graphify\requirements.lock') 'mcp'
     Ensure-UvTool 'headroom-ai' '0.37.0' 'headroom-ai==0.37.0' (Join-Path $origin 'tools\headroom\requirements.lock')
@@ -388,14 +397,15 @@ if (-not $SkipMcpRegistration) {
     Write-Host "Workspace policy mode: $workspaceMode. DelegationRoots is optional explicit scope, not a per-project installation step."
     if ($workspaceMode -eq 'STRICT_ROOTS') { Write-Host 'Existing restrictive scope retained. AUTO_ACTIVE requires an explicit policy-owner opt-in.' }
     $peerEnvironment = @{ PEER_AGY_BIN = $agyPath; PEER_CODEX_BIN = $codexPeerPath; PEER_AGENTS_ALLOWED_ROOTS = $peerRoots; PEER_AGY_SANDBOX_MODE = $sandboxMode; PEER_AGENTS_WORKSPACE_MODE = $workspaceMode }
-    Register-CodexMcp -Name 'peer-agents' -Command $nodePath -Arguments @($peerPath) -Environment $peerEnvironment -TimeoutSeconds 1980
-    Register-CodexMcp -Name 'graphify' -Command $graphifyPath -Arguments @() -Environment @{} -TimeoutSeconds 120
-    Register-CodexMcp -Name 'headroom' -Command $headroomPath -Arguments @('mcp','serve') -Environment @{} -TimeoutSeconds 120
-    Register-CodexMcp -Name 'jev' -Command $nodePath -Arguments @($jevPath) -Environment @{} -TimeoutSeconds 120
-    Register-AntigravityMcp -Name 'peer-agents' -Command $nodePath -Arguments @($peerPath) -Environment $peerEnvironment
-    Register-AntigravityMcp -Name 'graphify' -Command $graphifyPath -Arguments @() -Environment @{}
-    Register-AntigravityMcp -Name 'headroom' -Command $headroomPath -Arguments @('mcp','serve') -Environment @{}
-    Register-AntigravityMcp -Name 'jev' -Command $nodePath -Arguments @($jevPath) -Environment @{}
+    $hostSetup = Join-Path $origin 'scripts\sync-hosts.ps1'
+    $hostArguments = @{ Origin=$origin; CodexPeerPath=$codexPeerPath; Servers=@('peer-agents','graphify','headroom','jev'); PeerEnvironment=$peerEnvironment }
+    if ($IncludeRea) { $hostArguments.Servers += 'rea' }
+    if ($DryRun) { Write-Host '[dry-run] Preview/apply manifest host registrations with backups; retain disable flags and permissions.' }
+    else {
+        $preview = & $hostSetup @hostArguments | ConvertFrom-Json
+        Write-Host "Host registration changes: $($preview.changes.Count). Existing disabled servers stay disabled."
+        & $hostSetup @hostArguments -Apply -ExpectedDigest $preview.digest
+    }
 } else {
     Write-Host '5/7 Skipping MCP registration by request'
 }

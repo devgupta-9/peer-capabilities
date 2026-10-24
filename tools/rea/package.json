@@ -1,0 +1,9 @@
+{
+  "name": "peer-capabilities-rea-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional pinned REA MCP runtime; analysis engines remain bring-your-own.",
+  "license": "UNLICENSED",
+  "dependencies": { "rea-agents": "6.5.0" },
+  "overrides": { "zod": "4.6.7" }
+}
