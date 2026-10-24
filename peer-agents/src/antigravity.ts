@@ -8,7 +8,7 @@ export const toolEvidenceHash = (value: string) => createHash('sha256').update(v
 export const toolPathHash = (value: string) => toolEvidenceHash(process.platform === 'win32'
   ? path.resolve(value).toLowerCase() : path.resolve(value));
 export type AntigravityToolEvidence = { tool: string; commandHash?: string; cwdHash?: string;
-  cwdSource?: 'tool' | 'session'; gitRootHash?: string; pathHash?: string };
+  cwdSource?: 'tool' | 'session'; gitRootHash?: string; pathHash?: string; server?: string; mcpTool?: string };
 
 export type AntigravityInput = {
   prompt: string;
@@ -64,15 +64,15 @@ export function parseAntigravityResult(result: CaptureResult) {
     if (step) sawStep = true;
     if (step?.tool_info?.error) {
       const message = String(step.tool_info.error.message ?? 'tool failed');
-      if (/exebox:|sandbox configuration|permission.*denied|auto-denied/i.test(message)) {
+      if (/exebox:|sandbox configuration|permission.*denied|auto-denied|soft-denied/i.test(message)) {
         throw new Error(`Antigravity tool could not execute: ${truncate(redact(message), 2048)} No automatic permission bypass was attempted.`);
       }
       if (toolFailures.length < 20) toolFailures.push({ tool: redact(String(step.tool_name ?? 'unknown')), message: truncate(redact(message), 2048) });
-    } else if (step?.state === 'DONE' && typeof step.tool_info?.output === 'string' && toolEvidence.length < 1000) {
+    } else if (step?.state === 'DONE' && step.tool_info && toolEvidence.length < 1000) {
       const info = step.tool_info;
       const tool = step.tool_name ?? info.name;
       // Allowlisted, hashed observations only: no raw file contents, paths, or arbitrary arguments.
-      if (tool === 'run_command' && typeof info.parameters?.CommandLine === 'string') {
+      if (tool === 'run_command' && typeof info.output === 'string' && typeof info.parameters?.CommandLine === 'string') {
         // CLI 1.3.x emits CommandLine only; its init event establishes the session cwd.
         // Explicit overrides, including invalid ones, must never inherit that default.
         const explicitCwd = Object.hasOwn(info.parameters, 'Cwd');
@@ -83,8 +83,17 @@ export function parseAntigravityResult(result: CaptureResult) {
             ? { cwdHash: toolPathHash(cwd), cwdSource: explicitCwd ? 'tool' as const : 'session' as const } : {}),
           ...(info.parameters.CommandLine === 'git rev-parse --show-toplevel' && path.isAbsolute(rootOutput)
             && !/[\r\n]/.test(rootOutput) ? { gitRootHash: toolPathHash(rootOutput) } : {}) });
-      } else if (tool === 'view_file' && typeof info.parameters?.AbsolutePath === 'string') {
+      } else if (tool === 'view_file' && typeof info.output === 'string' && typeof info.parameters?.AbsolutePath === 'string') {
         toolEvidence.push({ tool, pathHash: toolPathHash(info.parameters.AbsolutePath) });
+      } else if (tool === 'call_mcp_tool') {
+        const { ServerName: server, ToolName: mcpTool } = info.parameters ?? {};
+        // Large MCP results are externalized by AGY and have no inline output string.
+        // DONE proves tool completion, not every backend's health. Never retain arguments/output.
+        const identifier = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+        if (typeof server === 'string' && identifier.test(server)
+          && typeof mcpTool === 'string' && identifier.test(mcpTool)) {
+          toolEvidence.push({ tool, server, mcpTool });
+        }
       }
     }
     if (event?.event === 'result') {
@@ -117,7 +126,39 @@ export async function runAntigravity(input: AntigravityInput, depth: number) {
 }
 
 type Discovery = { models: string[]; status: 'AVAILABLE' | 'TIMEOUT' | 'UNAVAILABLE';
-  observedAt: string; cached: boolean; error?: string };
+  observedAt: string; cached: boolean; durationMs?: number; error?: string };
+
+/** Cold CLI startup is not absence. Share concurrent checks and retain only successful observations. */
+export function discoverAntigravityVersion(options: { command: string; capture?: typeof runCapture; ttlMs?: number }) {
+  type Version = Omit<Discovery, 'models'> & { version: string | null };
+  let cached: Version | undefined;
+  let expiresAt = 0;
+  let pending: Promise<Version> | undefined;
+  return async (): Promise<Version> => {
+    if (cached && Date.now() < expiresAt) return { ...cached, cached: true };
+    if (pending) return pending;
+    pending = (async (): Promise<Version> => {
+      const observedAt = new Date().toISOString();
+      try {
+        const result = await (options.capture ?? runCapture)(options.command, ['--version'], {
+          timeoutSeconds: 30, env: childEnvironment(process.env, 'antigravity'),
+        });
+        const version = (result.stdout || result.stderr).trim();
+        if (result.timedOut) return { version: null, status: 'TIMEOUT', observedAt, cached: false,
+          durationMs: result.durationMs, error: 'CLI version discovery timed out after 30s; this does not establish that the CLI is missing.' };
+        if (result.code !== 0 || result.cancelled || result.stdoutTruncated || result.stderrTruncated
+          || !version || version.length > 256) throw new Error('version unavailable');
+        cached = { version: redact(version), status: 'AVAILABLE', observedAt, cached: false, durationMs: result.durationMs };
+        expiresAt = Date.now() + (options.ttlMs ?? 60_000);
+        return cached;
+      } catch {
+        return { version: null, status: 'UNAVAILABLE', observedAt, cached: false,
+          error: 'CLI version discovery failed; check the configured executable. Raw diagnostics withheld.' };
+      }
+    })();
+    try { return await pending; } finally { pending = undefined; }
+  };
+}
 
 /** Cache successful observations briefly; never turn a discovery failure into a model rejection. */
 export function discoverAntigravityModels(options: { command: string; capture?: typeof runCapture; ttlMs?: number }) {
@@ -132,14 +173,14 @@ export function discoverAntigravityModels(options: { command: string; capture?: 
       const observedAt = new Date().toISOString();
       try {
         const result = await capture(options.command, ['models'], { timeoutSeconds: 90, env: childEnvironment(process.env, 'antigravity') });
-        if (result.timedOut) return { models: [], observedAt, cached: false, status: 'TIMEOUT',
+        if (result.timedOut) return { models: [], observedAt, cached: false, status: 'TIMEOUT', durationMs: result.durationMs,
           error: 'Antigravity model discovery timed out after 90s. Check provider connectivity and official login, then retry discovery.' };
-        if (result.code !== 0 || result.cancelled || result.stdoutTruncated) throw new Error('catalog command failed');
+        if (result.code !== 0 || result.cancelled || result.stdoutTruncated || result.stderrTruncated) throw new Error('catalog command failed');
         const models = [...new Set(result.stdout.replace(/\x1b\[[0-9;]*m/g, '').split(/\r?\n/)
           .map(line => line.trim()).filter(line => !/^(?:Fetching available models|Available models\s*:)/i.test(line))
           .map(line => line.split(/\s+/)[0]).filter(slug => /^[a-z0-9][a-z0-9._-]*$/i.test(slug)))];
         if (!models.length) throw new Error('empty catalog');
-        cached = { models, observedAt, status: 'AVAILABLE', cached: false };
+        cached = { models, observedAt, status: 'AVAILABLE', cached: false, durationMs: result.durationMs };
         expiresAt = Date.now() + (options.ttlMs ?? 60_000);
         return cached;
       } catch {

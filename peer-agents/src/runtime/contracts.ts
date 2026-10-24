@@ -1,4 +1,5 @@
 import * as z from 'zod/v4';
+import type { ResourceContext, ResourceAssignment } from './resource-routing.js';
 
 export const availability = z.enum(['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW', 'RATE_LIMITED',
   'QUOTA_EXHAUSTED', 'AUTH_REQUIRED', 'MODEL_UNAVAILABLE', 'SERVICE_UNAVAILABLE', 'TIMEOUT',
@@ -11,6 +12,7 @@ export type Choice = {
   agent: string; model: string; effort: string; efforts: string[]; roles: Role[];
   competence: number; cost: number; latency: number; contextWindow: number;
   availability: Availability; authentication: Authentication; provider: string; quotaPool: string;
+  resource?: ResourceAssignment;
 };
 export type Observation = {
   component: string; presence: 'DISCOVERED' | 'INSTALLED' | 'CONFIGURED';
@@ -27,7 +29,7 @@ export type AgentResult = {
 };
 export interface AgentAdapter {
   readonly id: string;
-  discover(): Promise<{ observation: Observation; choices: Choice[] }>;
+  discover(): Promise<{ observation: Observation; choices: Choice[]; resourceContext?: ResourceContext }>;
   execute(input: Invocation): Promise<AgentResult>;
   loginInstructions(): string;
 }

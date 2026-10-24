@@ -11,7 +11,7 @@ test('restartable CLI workflow supports quota degradation and single-agent witho
   const runner = await import('../dist/runtime/runner.js').catch(() => ({}));
   assert.equal(typeof runner.Runtime, 'function');
   for (const single of [false, true]) {
-    for (const disabled of [['graphify'], ['headroom'], ['jev'], ['graphify', 'headroom', 'jev']]) {
+    for (const disabled of [['graphify'], ['headroom'], ['jev'], ['rea'], ['graphify', 'headroom', 'jev', 'rea']]) {
       const directory = await mkdtemp(path.join(tmpdir(), 'peer-slice-'));
       const root = path.join(directory, 'repo');
       try {
@@ -34,6 +34,11 @@ test('restartable CLI workflow supports quota degradation and single-agent witho
         assert.equal(integrated.report.tests.length, 2);
         assert.equal(integrated.report.humanDecisions[0].actor, 'test-harness');
         assert.ok(integrated.report.limitations.length);
+        assert.deepEqual(integrated.report.toolsExecutedByRuntime, []);
+        assert.equal(integrated.report.toolSelections.length, single ? 1 : 2);
+        for (const item of integrated.report.toolSelections) {
+          for (const name of disabled) assert.equal(item.toolSelection.decisions.find(d => d.integration === name).status, 'SKIPPED');
+        }
       } finally { await rm(directory, { recursive: true, force: true }); }
     }
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { antigravityCommand, antigravitySandboxMode, parseAntigravityResult, discoverAntigravityModels, toolPathHash } from '../dist/antigravity.js';
+import { antigravityCommand, antigravitySandboxMode, parseAntigravityResult, discoverAntigravityModels, discoverAntigravityVersion, toolPathHash } from '../dist/antigravity.js';
 
 const complete = (stdout, overrides = {}) => ({ code: 0, stdout, stderr: '', timedOut: false,
   cancelled: false, stdoutTruncated: false, stderrTruncated: false, durationMs: 12, ...overrides });
@@ -137,4 +137,68 @@ test('catalog timeouts stay distinct from invalid model selection and are not ca
   assert.deepEqual(result.models, []);
   await discovery();
   assert.equal(calls, 2);
+});
+
+test('version discovery shares concurrent probes and reports timeout rather than missing CLI', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const discover = discoverAntigravityVersion({ command: 'fixture', capture: async (_command, args, options) => {
+    calls++;
+    assert.deepEqual(args, ['--version']);
+    assert.equal(options.timeoutSeconds, 30);
+    await gate;
+    return complete('1.4.4');
+  } });
+  const first = discover(), second = discover();
+  release();
+  assert.deepEqual(await first, await second);
+  assert.equal(calls, 1);
+  assert.equal((await discover()).cached, true);
+  let failures = 0;
+  const timeout = discoverAntigravityVersion({ command: 'fixture', capture: async () => {
+    failures++;
+    return complete('1.4.4', { timedOut: true, durationMs: 30001 });
+  } });
+  assert.equal((await timeout()).status, 'TIMEOUT');
+  assert.equal((await timeout()).version, null);
+  assert.equal(failures, 2);
+});
+
+test('incomplete version and catalog observations never become available', async () => {
+  for (const flags of [{ cancelled: true }, { stdoutTruncated: true }, { stderrTruncated: true }, { code: 1 }]) {
+    const capture = async () => complete('1.4.4', flags);
+    assert.equal((await discoverAntigravityVersion({ command: 'fixture', capture })()).status, 'UNAVAILABLE');
+    assert.equal((await discoverAntigravityModels({ command: 'fixture', capture })()).status, 'UNAVAILABLE');
+  }
+});
+
+test('catalog discovery coalesces concurrent requests without changing the exact model', async () => {
+  let calls = 0;
+  const discover = discoverAntigravityModels({ command: 'fixture', capture: async () => {
+    calls++;
+    return complete('gemini-fixture-high Description');
+  } });
+  const results = await Promise.all([discover(), discover(), discover()]);
+  assert.equal(calls, 1);
+  assert.deepEqual(results.map(r => r.models), Array(3).fill(['gemini-fixture-high']));
+});
+
+test('MCP completion evidence records safe names only and never hides a soft denial', () => {
+  const event = { event: 'step_update', step_update: { state: 'DONE', tool_name: 'call_mcp_tool',
+    tool_info: { parameters: { ServerName: 'headroom', ToolName: 'headroom_stats', Arguments: { private: 'withheld' } }, output: 'private output' } } };
+  const parse = e => parseAntigravityResult(complete(JSON.stringify(e) + '\n' + final({ status: 'SUCCESS', response: 'done' })));
+  assert.deepEqual(parse(event).toolEvidence, [{ tool: 'call_mcp_tool', server: 'headroom', mcpTool: 'headroom_stats' }]);
+  const externalized = structuredClone(event);
+  delete externalized.step_update.tool_info.output;
+  assert.deepEqual(parse(externalized).toolEvidence, parse(event).toolEvidence);
+  const unsafe = structuredClone(event);
+  unsafe.step_update.tool_info.parameters.ServerName = '/private/path';
+  assert.deepEqual(parse(unsafe).toolEvidence, []);
+  const failed = structuredClone(event);
+  failed.step_update.tool_info.error = { message: 'Input validation error' };
+  assert.deepEqual(parse(failed).toolEvidence, []);
+  assert.equal(parse(failed).toolFailures.length, 1);
+  failed.step_update.tool_info.error = { message: 'MCP call soft-denied' };
+  assert.throws(() => parse(failed), /soft-denied/);
 });

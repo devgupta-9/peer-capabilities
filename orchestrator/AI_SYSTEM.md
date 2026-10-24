@@ -6,10 +6,13 @@ Shared authority: %USERPROFILE%\.ai-rules\MASTER-AGENTS-REFERENCE.md. This docum
 
 Either host can lead. Use current discovery and the task's needs, not a fixed role allocation. Shared core MCPs are intentional; ecosystem-specific integrations need not be duplicated.
 
+For nontrivial work, use `select_task_tools` when discovered, or `peer-capabilities tools select`, to obtain task-specific recommendations. Governed runtime and delegated prompts include the same selection automatically. Explicit needs can correct intent inference. Selection is advice, not authorization, authentication or proof of execution: check current-session discovery, retain disabled flags, honor data/cost permissions and report actual calls separately. If an optional tool cannot run, continue with direct source inspection/exact evidence/tests and state the limitation. Never force every integration into every task. ChatGPT web is not part of this local setup.
+
 - peer-agents: exact lead-selected model/effort; bounded optional help; no default multi-agent pipeline.
 - Graphify: local code relationships and impact navigation. Existing graph first; verify against current source. Prefer authorized local AST-only indexing.
 - Headroom: compress genuinely large results; retain hashes and retrieve originals before exact comparisons or edits. It does not automatically choose skills, enforce routing, or prove every session uses a proxy.
 - Jev: optional structured decision advice. The maintained @jkudish/jev-mcp package is shared by both hosts. Discover actual tools instead of assuming the legacy six-tool interface. No confidence threshold grants permission.
+- REA: optional shipped-artifact, binary and runtime-evidence analysis. Use normal source tools for ordinary repository work. Vendor skills and native engines are separately installed; a discovered catalog does not verify every backend.
 - Current docs: appropriate authoritative documentation tools or official sources.
 - Browser: use the host browser for exploration, Playwright for reproducible flows, DevTools for runtime/network diagnosis when available. Avoid conflicting control of one browser session; honor each host's browser skill boundaries.
 
@@ -31,3 +34,5 @@ Current source/runtime outrank stale graphs, inventories, and memory. Project do
 ## Health workflow
 
 Run %USERPROFILE%\.ai-rules\scripts\validate.ps1 -Probe. It checks source/live hashes, supported local configuration expectations, executable existence and fresh MCP tool discovery. It does not assert remote authentication or successful model access. Reconnect hosts after registration changes and verify an in-session harmless call separately.
+
+Codex, Antigravity CLI, Antigravity IDE, Claude Code and Claude Desktop have separate configuration scopes. scripts/sync-hosts.ps1 previews and reconciles explicitly selected scopes from integrations.json. It preserves permissions and disable flags. Claude Desktop does not read Claude Code's bootstrap; remote/web apps require their own supported connector flow. Never expose local stdio servers publicly to simulate desktop parity.

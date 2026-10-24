@@ -25,7 +25,8 @@ test('fresh task MCP shares durable state and exposes no approval or integration
       args: ['mcp', '--repo', root, '--config', config, '--state-dir', path.join(dir, 'state')],
     };
     const listing = await callBridge('tools/list', {}, options);
-    assert.equal(listing.tools.length, 5);
+    assert.equal(listing.tools.length, 6);
+    assert.ok(listing.tools.some(t => t.name === 'select_task_tools'));
     assert.ok(!listing.tools.some(t => /approve|integrate|login/.test(t.name)));
     const created = await callBridge('v1_task_create', { objective: 'Inspect fixture' }, options);
     const task = JSON.parse(created.content[0].text);

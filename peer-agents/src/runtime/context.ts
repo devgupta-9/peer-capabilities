@@ -1,5 +1,6 @@
 import { assertNonSecret } from '../security.js';
 import { digest } from './identity.js';
+import type { TaskToolPlan } from '../tool-selection.js';
 
 export type Allocation = { window: number; occupied: number; host: number; output: number; tools: number; margin: number; ceiling: number; remaining: number };
 export type Checkpoint = { session?: string; packageHash: string; cursor: number; policyVersion: string; fingerprint: string; graphVersion: string | null; contextVersion: number };
@@ -8,6 +9,7 @@ export function contextPackage(input: {
   evidence: { id: string; text: string; mandatory: boolean }[]; events: { sequence: number; [key: string]: unknown }[];
   policyVersion: string; fingerprint: string; graphVersion: string | null; allocation: Allocation;
   checkpoint?: Checkpoint; session?: { id: string; valid: boolean; acknowledgedHash: string };
+  toolSelection?: TaskToolPlan;
 }) {
   assertNonSecret(input);
   if (Object.values(input.allocation).some(n => !Number.isFinite(n) || n < 0)) throw new Error('Invalid context allocation');
@@ -23,6 +25,7 @@ export function contextPackage(input: {
     schemaVersion: 1, kind: delta ? 'DELTA' : 'FULL', task: input.task, role: input.role, question: input.question,
     constraints: input.constraints, policyVersion: input.policyVersion, fingerprint: input.fingerprint,
     graphVersion: input.graphVersion, events: input.events.filter(e => !delta || e.sequence > cp!.cursor),
+    ...(input.toolSelection ? { toolSelection: input.toolSelection } : {}),
     evidence: input.evidence.filter(e => e.mandatory), omissions: [] as string[],
     allocation: { ...a, usable, limit, estimator: 'utf8-bytes-conservative-v1', estimated: true },
   };

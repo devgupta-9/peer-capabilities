@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCodexCatalog, validateChoice } from '../dist/model-policy.js';
+import * as policy from '../dist/model-policy.js';
+const { parseCodexCatalog, validateChoice } = policy;
 
 const models = parseCodexCatalog({ models: [
   { slug: 'engineering-model', description: 'Capable engineering model', supported_reasoning_levels: [{ effort: 'high' }, { effort: 'xhigh' }] },
@@ -28,6 +29,20 @@ test('Antigravity mismatches, unknown models, and unsupported effort are rejecte
   assert.throws(() => validateChoice('antigravity', 'gemini-3.8-flash-low', 'high', [], ['gemini-3.8-flash-low']), /disagree/);
   assert.throws(() => validateChoice('antigravity', 'unknown', 'low', [], []), /not in/);
   assert.throws(() => validateChoice('antigravity', 'claude-sonnet-4-6', 'xhigh', [], ['claude-sonnet-4-6']), /supports/);
+});
+test('explicit Antigravity dispatch validates the pin without depending on catalog discovery', () => {
+  assert.deepEqual(policy.validatePinnedAntigravityChoice('gemini-3.8-flash-high', 'high'),
+    { model: 'gemini-3.8-flash-high', effort: 'high', fallback: false });
+  // Existence/account access is checked by the provider CLI, not fabricated locally.
+  assert.deepEqual(policy.validatePinnedAntigravityChoice('provider-custom-model', 'medium'),
+    { model: 'provider-custom-model', effort: 'medium', fallback: false });
+});
+test('provider-owned model validation does not relax local effort or explicit-pin policy', () => {
+  for (const model of ['', '--model', 'model with spaces', 'auto', 'default', 'a'.repeat(129)]) {
+    assert.throws(() => policy.validatePinnedAntigravityChoice(model, 'high'), /explicit|slug/);
+  }
+  assert.throws(() => policy.validatePinnedAntigravityChoice('gemini-3.8-flash-low', 'high'), /disagree/);
+  assert.throws(() => policy.validatePinnedAntigravityChoice('claude-sonnet-4-6', 'xhigh'), /supports/);
 });
 test('invalid catalogs fail closed', () => {
   assert.throws(() => parseCodexCatalog({ models: [{ slug: 'incomplete' }] }));

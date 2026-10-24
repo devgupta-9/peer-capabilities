@@ -4,9 +4,11 @@ import { redact } from '../security.js';
 import { Runtime } from './runner.js';
 import { TaskStore } from './store.js';
 import { PACKAGE_VERSION } from '../version.js';
+import { registerTaskToolSelector } from '../tool-selection-host.js';
 
-export function createTaskServer(runtime: Runtime, store: TaskStore, repository: string): McpServer {
+export function createTaskServer(runtime: Runtime, store: TaskStore, repository: string, enabled: Readonly<Record<string, boolean>> = {}): McpServer {
   const server = new McpServer({ name: 'peer-capabilities', version: PACKAGE_VERSION });
+  registerTaskToolSelector(server, enabled);
   const reply = (value: unknown, isError = false) => ({
     content: [{ type: 'text' as const, text: redact(JSON.stringify(value)) }], ...(isError ? { isError: true } : {}),
   });

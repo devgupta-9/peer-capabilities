@@ -1,14 +1,15 @@
 # Identity and Resource Contracts
 
-Status: local development implementation, updated 2026-10-13. Not release-qualified.
-Scope: resource contracts, environment persistence and scoped observations with behavioral tests.
+Status: local development implementation, updated 2026-10-23. Not release-qualified.
+Scope: resource contracts, environment persistence, scoped observations and opt-in dispatch consumption.
 
 ## Boundary and rationale
 
 The existing `Choice` fields are insufficient to distinguish multiple accounts,
 frontends and shared quota pools. Add a validated metadata boundary first; do not
 infer account identities from CLI names, copy credentials, or rewrite task history.
-This preserves the current scheduler/adapters until explicit migration is tested.
+Legacy configurations retain their existing scheduler/adapter behavior. The opt-in
+dispatch increment below consumes explicit bindings without inferring identities.
 
 | Record | Meaning |
 | --- | --- |
@@ -45,7 +46,7 @@ model, worker or effort. Return data is a detached validated snapshot.
   No reserve-unlock or account-rotation mechanism is introduced.
 - Static compatibility is not permission to dispatch. Authentication observations,
   quota availability, privacy, repository authorization and human gates remain required.
-- No auth flow, scheduler routing or installed-host configuration changes.
+- The initial metadata increment changes no auth flow, scheduler routing or installed-host configuration.
 
 ## Environment persistence — second increment
 
@@ -101,16 +102,19 @@ remain separate and are never promoted into scoped verification.
 
 Observation metadata is not cryptographic provider proof, policy authorization,
 quota reservation or competence certification. These APIs are for trusted runtime
-collectors; live collectors and scheduler consumption are not yet wired. History
+collectors; live collectors remain deferred. Opt-in scheduler consumption is
+described below. History
 checks currently scale with intervening catalog revisions; before high-frequency
 routing, evaluate cached invalidation generations without weakening rollback safety.
 
 ## Follow-on increments
 
-1. Adapt discovery and scheduler assignments without inferring missing identities
-   or changing exact-model/no-fallback policy. Profiles need model-specific evidence
-   before being used as competence claims by the scheduler.
-2. Expose inspection in doctor, then certify migration and the single/N-agent paths.
+1. Implement trusted scoped collectors and certify how each frontend identifies
+   its actual provider-owned context. Never promote discovery or a generic login
+   result into model/role/tool verification. Keep this separate from credentials.
+2. Expose scoped inspection in doctor, then certify migration and live single/N-agent paths.
+3. Measure model-specific competence and tool evidence before treating declared
+   profiles as certified capabilities. Learned routing remains deferred.
 
 Existing Phase-0 follow-up changes are preserved separately in the working tree.
 Their pending commit/push and exact-SHA three-platform CI remain open gates.
@@ -142,3 +146,81 @@ contents and partial/unknown schemas. Current-content secret scan passed (140 fi
 Interface/review checks kept the API additive and invalid evidence inaccessible.
 No independent peer review or live-provider proof is claimed. Nothing was deployed,
 committed or pushed; exact-SHA three-platform CI remains unverified.
+
+## Scoped dispatch consumption — fourth increment (2026-10-23)
+
+Experimental provider configuration can opt in with a `resources` entry:
+
+```json
+{ "resources": { "workerId": "worker", "bindingIds": ["binding"] } }
+```
+
+This entry belongs inside an existing agent configuration, alongside its exact
+model profiles. It references an already populated environment resource catalog;
+it does not create or enroll resources. The worker must match the frontend, and
+every binding must use that worker's auth context. One exact model cannot have
+multiple selected binding aliases. This prevents implicit account/pool rotation.
+
+`resource-routing.ts` narrows provider-discovered, operator-configured exact model
+profiles. A candidate needs current `VERIFIED` functional evidence for its exact
+worker, binding, role, effort, frontend version and configuration. Missing,
+expired, configuration-invalidated, unverified, auth-required or quota-failed
+evidence is ineligible. Legacy component-wide verification cannot fill the gap.
+Non-active account policies and disabled resources remain blocked.
+
+Choices carry explicit provider/pool identities and non-secret resource provenance.
+Competence and context capacity are bounded by both the existing model-specific
+profile and the resource metadata; neither is upgraded by a successful login or
+no-op probe. These remain declared bounds, not empirical certification. Arbitrary
+feature/tool certification and learned routing are not added by this increment.
+
+The scheduler preserves the verified effort/role and checks expiry. The provider
+adapter rediscovers and revalidates the exact evidence before execution. The
+runtime refreshes reviewer candidates after lead work, rather than reusing its
+initial availability snapshot. Existing single-agent compensating verification,
+worktree isolation and human integration gates remain unchanged.
+
+`ASSIGNED` events accept an optional strictly validated resource provenance field,
+which survives canonical replay/checkpoint/resume. Old task records remain valid;
+older runtimes are not promised to read new resource-bearing events. No task or
+environment database schema migration is required, and historical events are not
+rewritten. Do not run mixed runtime versions against the same task state.
+
+CLI discovery exposes `resourceContext` for trusted collectors: `frontendVersion`
+is the digest of the observed version string; `configurationDigest` covers the
+normalized adapter configuration and launch command. These are matching keys,
+not binary attestation or provider-account proof. The CLI keeps the environment
+database available throughout task/MCP execution and closes command-scoped handles.
+
+### Trust boundary and rollout limits
+
+- Binding the current provider-owned CLI context to a worker is an explicit trusted
+  host/operator assertion. No login, account switching or credential inspection is
+  performed. Actual account/context certification remains an open gate.
+- No MCP-callable observation writer is introduced. Existing generic `verify`
+  refuses resource-bound adapters; it cannot fabricate scoped verification.
+- Trusted live scoped collectors, tool-capability verification, and automatic
+  persistence of live invocation failures remain future increments. This slice
+  consumes observations; it does not silently generate or refresh them.
+- Existing adapters without `resources` remain compatible. No live configuration,
+  installed runtime, provider permission, or credential was changed in this task.
+- Verification uses disposable databases and deterministic adapter responses,
+  not live provider/account certification. Remote three-platform CI remains open.
+
+### Verification — 2026-10-23
+
+Windows: TypeScript build and the final full Node suite passed (**198/198**, seven
+new resource-routing tests). Tests cover absence of scoped evidence, legacy
+verification isolation, exact role/effort/agent identity, tampered or missing
+provenance, expiry, quota/auth failures, configuration changes and rollback,
+ambiguous bindings, wrong frontends, CLI state lifetime, single-agent task replay
+and resume, and reviewer availability changing after lead work. Existing degraded
+review, package-install and host-MCP tests remain green. The cross-agent regression
+failed before adding its guard, then passed with no provider invocation.
+
+Current-content publication scan: **163 files, zero findings**. Production
+dependency audit: **zero vulnerabilities**. `git diff --check` passed. AGY's
+bounded text-only review (`gemini-3.8-flash-high`, high effort, 240-second budget)
+timed out; no independent approval, fallback or automatic retry is claimed.
+Local review was completed. No live resource enrollment, scoped provider probe,
+configuration deployment, commit, push or remote CI run was performed.

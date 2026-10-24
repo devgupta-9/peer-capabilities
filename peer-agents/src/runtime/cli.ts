@@ -13,6 +13,9 @@ import { assertNonSecret, redact } from '../security.js';
 import { defaultEnvironmentDirectory } from './environment-state.js';
 import { WorkspaceAuthorizer } from '../path-policy.js';
 import { PACKAGE_VERSION } from '../version.js';
+import { selectTaskTools } from '../tool-selection.js';
+import { registerTaskToolSelector } from '../tool-selection-host.js';
+import { McpServer } from '@modelcontextprotocol/server';
 
 const configSchema = z.object({
   agents: z.array(adapterConfigSchema),
@@ -30,10 +33,11 @@ export async function main(argv: string[]): Promise<void> {
   const { values: v, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
     help: { type: 'boolean' }, apply: { type: 'boolean' }, 'checkpoint-only': { type: 'boolean' },
     manifest: { type: 'string' }, root: { type: 'string' }, 'state-dir': { type: 'string' },
-    config: { type: 'string' }, repo: { type: 'string' }, objective: { type: 'string' }, id: { type: 'string' },
+    config: { type: 'string' }, repo: { type: 'string' }, objective: { type: 'string' }, id: { type: 'string' }, input: { type: 'string' },
   } });
   const command = positionals[0] ?? 'help';
   if (v.help || command === 'help') {
+    console.log('Tool selection: tools select --objective TEXT | --input FILE; tools mcp (host-neutral local stdio). Selection is advice, never execution or permission.');
     console.log('Projects: project add <absolute-root> | remove <absolute-root> | list | check <absolute-path>\nEnrollment is explicit additional trust, not required for a host-reported active Git workspace.');
     console.log('Peer Capabilities (development; not release-certified)\nCommands: setup doctor update sync repair rollback uninstall version discover verify run resume status mcp\nEnvironment: --manifest FILE --root DIRECTORY [--state-dir DIRECTORY] [--apply]\nTasks: --repo REPOSITORY --config FILE [--objective TEXT] [--id UUID] [--checkpoint-only]\nsetup/update/sync/repair preview changes unless --apply. CLI/MCP integration is disabled pending trusted host approval. Inspect the verified patch for deliberate manual integration. No npm postinstall mutations.');
     return;
@@ -45,6 +49,16 @@ export async function main(argv: string[]): Promise<void> {
   }
   const depth = Number(process.env.PEER_AGENTS_DEPTH ?? 0);
   if (!Number.isSafeInteger(depth) || depth !== 0) throw new Error('Recursive runtime invocation prohibited');
+  if (command === 'tools') {
+    if (positionals[1] === 'mcp') {
+      await serveStdio(() => {
+        const server = new McpServer({ name: 'peer-capabilities-tools', version: PACKAGE_VERSION });
+        registerTaskToolSelector(server); return server;
+      }); return;
+    }
+    if (positionals[1] !== 'select' || Boolean(v.input) === Boolean(v.objective)) throw new Error('tools select requires exactly one of --objective or --input');
+    print(selectTaskTools(v.input ? await json(v.input) : { objective: v.objective })); return;
+  }
   if (command === 'project') {
     const action = positionals[1], target = positionals[2];
     const policy = new WorkspaceAuthorizer();
@@ -85,10 +99,12 @@ export async function main(argv: string[]): Promise<void> {
   const root = await repositoryRoot(path.resolve(v.repo));
   const environmentPath = path.join(path.resolve(v['state-dir'] ?? defaultEnvironmentDirectory(root)), 'environment.sqlite');
   const environment = new EnvironmentManager(environmentPath, root);
-  const adapters = config.agents.map(c => new ProviderAdapter(c, environment.getObservation(c.id)));
-  if (command === 'discover' || command === 'verify') {
-    const results = [];
-    try {
+  let store: TaskStore | undefined;
+  let serving = false;
+  try {
+    const adapters = config.agents.map(c => new ProviderAdapter(c, environment.getObservation(c.id), undefined, environment));
+    if (command === 'discover' || command === 'verify') {
+      const results = [];
       for (const adapter of adapters) {
         if (command === 'verify') {
           const observation = await adapter.verify(root);
@@ -98,14 +114,15 @@ export async function main(argv: string[]): Promise<void> {
         }
       }
       print({ agents: results, releaseSupported: false });
-    } finally { environment.close(); }
-    return;
-  }
-  environment.close();
-  const store = new TaskStore(path.join(await stateDirectory(root), 'tasks.sqlite'));
-  const runtime = new Runtime(store, adapters, config.policy);
-  if (command === 'mcp') { await serveStdio(() => createTaskServer(runtime, store, root)); return; }
-  try {
+      return;
+    }
+    const taskStore = new TaskStore(path.join(await stateDirectory(root), 'tasks.sqlite'));
+    store = taskStore;
+    const runtime = new Runtime(taskStore, adapters, config.policy);
+    if (command === 'mcp') {
+      await serveStdio(() => createTaskServer(runtime, taskStore, root, config.policy.optionalIntegrations));
+      serving = true; return; // Both databases remain live for the stdio server lifetime.
+    }
     if (command === 'run') {
       if (!v.objective) throw new Error('--objective is required');
       print(await runtime.start(root, v.objective, v['checkpoint-only'])); return;
@@ -114,5 +131,5 @@ export async function main(argv: string[]): Promise<void> {
     if (command === 'resume') { print(await runtime.resume(v.id)); return; }
     if (command === 'status') { print(runtime.report(v.id)); return; }
     throw new Error('Unknown command');
-  } finally { store.close(); }
+  } finally { if (!serving) { store?.close(); environment.close(); } }
 }

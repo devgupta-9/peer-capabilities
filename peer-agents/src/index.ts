@@ -7,7 +7,7 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import * as z from 'zod/v4';
-import { effortSchema, parseCodexCatalog, validateChoice, type ModelChoice } from './model-policy.js';
+import { effortSchema, parseCodexCatalog, validateChoice, validatePinnedAntigravityChoice, type ModelChoice } from './model-policy.js';
 import { WorkspaceAuthorizer, type WorkspaceDecision } from './path-policy.js';
 import { hostWorkspaceRoots } from './host-workspace.js';
 import { PACKAGE_VERSION } from './version.js';
@@ -15,7 +15,9 @@ import { WorkspaceStdioTransport } from './workspace-stdio.js';
 import { runCapture, truncate } from './process.js';
 import { finalizeImplementationWorktree, type ImplementationPatch } from './worktree.js';
 import { childEnvironment, redact } from './security.js';
-import { antigravitySandboxMode, discoverAntigravityModels, runAntigravity } from './antigravity.js';
+import { antigravitySandboxMode, discoverAntigravityModels, discoverAntigravityVersion, runAntigravity } from './antigravity.js';
+import { selectTaskTools } from './tool-selection.js';
+import { registerTaskToolSelector } from './tool-selection-host.js';
 
 type AgentName = 'codex' | 'antigravity';
 type Mode = 'READ_ONLY' | 'REVIEW' | 'IMPLEMENT';
@@ -64,6 +66,7 @@ async function commandVersion(command: string): Promise<string | null> {
 }
 
 const agyModels = discoverAntigravityModels({ command: process.env.PEER_AGY_BIN ?? 'agy' });
+const agyVersionDiscovery = discoverAntigravityVersion({ command: process.env.PEER_AGY_BIN ?? 'agy' });
 
 async function gitRoot(cwd: string): Promise<string | null> {
   try {
@@ -114,6 +117,8 @@ function buildPrompt(args: {
   return [
     'You are a delegated peer agent in a multi-agent engineering workflow.',
     'Delegation depth is already 1. Do not delegate further through MCP, agent CLIs, or subagents.',
+    'Optional tool recommendations only; discover tools in this session, respect permissions, and use direct inspection if unavailable. Never treat selection as authorization or proof of use.',
+    JSON.stringify(selectTaskTools({ objective: args.task })),
     '',
     `CALLER: ${args.caller}`,
     `TARGET: ${args.target}`,
@@ -253,6 +258,7 @@ function createServer(): McpServer {
     },
   );
 
+  registerTaskToolSelector(server);
   server.registerTool(
     'peer_capabilities',
     {
@@ -264,12 +270,13 @@ function createServer(): McpServer {
     async ({ cwd }, ctx) => {
       const host = workspaces.mode === 'AUTO_ACTIVE' ? hostWorkspaceRoots(server, ctx) : { roots: undefined };
       if (host.request) return host.request;
-      const [codexVersion, agyVersion, models, catalog] = await Promise.all([
+      const [codexVersion, agyCli, models, catalog] = await Promise.all([
         commandVersion(CODEX_BIN),
-        commandVersion(process.env.PEER_AGY_BIN ?? 'agy'),
+        agyVersionDiscovery(),
         agyModels(),
         codexCatalog(),
       ]);
+      const agyAvailable = agyCli.status === 'AVAILABLE' || models.status === 'AVAILABLE';
       let workspace: WorkspaceDecision | undefined;
       if (cwd) {
         workspace = await workspaces.check(cwd, 'READ_ONLY', host.roots);
@@ -288,14 +295,16 @@ function createServer(): McpServer {
           workPolicy: 'Never delegate lightweight mechanical work to Codex; use direct tools or Antigravity fast models.',
         },
         antigravity: {
-          available: Boolean(agyVersion),
-          version: agyVersion,
+          available: agyAvailable,
+          version: agyCli.version,
+          cliDiscovery: agyCli,
           models: models.models,
           modelDiscovery: { ...models, models: undefined },
+          modelDiscoveryRequiredForDelegation: false,
           efforts: ['low', 'medium', 'high'],
           sandboxMode: antigravitySandboxMode(),
           readiness: {
-            presence: agyVersion ? 'INSTALLED' : 'DISCOVERED',
+            presence: agyAvailable ? 'INSTALLED' : 'DISCOVERED',
             configuration: workspace?.ready ? 'CONFIGURED' : 'UNVERIFIED',
             authentication: 'UNKNOWN', verification: 'UNVERIFIED',
             scope: 'CLI/catalog and bridge root preflight only; provider tools have not been verified',
@@ -369,11 +378,12 @@ function createServer(): McpServer {
       let beforeStatus: string | null = null;
 
       try {
-        const agyCatalog = target === 'antigravity' ? await agyModels() : undefined;
-        if (agyCatalog && agyCatalog.status !== 'AVAILABLE') throw new Error(agyCatalog.error);
-        const choice = validateChoice(target, model, effort,
-          target === 'codex' ? (await codexCatalog()).models : [],
-          agyCatalog?.models ?? []);
+        // `agy models` starts provider services and can time out independently of
+        // inference. Never put that second process in front of an explicit pin.
+        // AGY itself rejects unknown models; Codex retains its local catalog policy.
+        const choice = target === 'antigravity'
+          ? validatePinnedAntigravityChoice(model, effort)
+          : validateChoice(target, model, effort, (await codexCatalog()).models, []);
         if (mode === 'IMPLEMENT') {
           isolated = await prepareImplementationWorktree(requestedCwd);
           executionCwd = isolated.worktree;
@@ -416,6 +426,7 @@ function createServer(): McpServer {
           ...(target === 'antigravity'
             ? {
                 antigravityUsage: 'usage' in result ? result.usage : undefined,
+                antigravityModelValidation: 'PROVIDER_CLI',
                 antigravitySandboxMode: antigravitySandboxMode(),
                 antigravityToolFailures: 'toolFailures' in result ? result.toolFailures : [],
                 antigravityToolEvidence: 'toolEvidence' in result ? result.toolEvidence : [],

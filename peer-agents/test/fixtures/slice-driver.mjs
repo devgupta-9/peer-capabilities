@@ -28,7 +28,7 @@ const adapters = single === 'true' ? [adapter('lead')] : [adapter('lead'), adapt
 const authority = fixtureAuthority();
 const runtime = new Runtime(store, adapters, {
   policyVersion: 'fixture-v1', manifestDigest: 'fixture-manifest', mode: 'STANDARD',
-  competence: 8, complexity: 'high', optionalIntegrations: Object.fromEntries(['graphify', 'headroom', 'jev'].map(k => [k, !disabled.split(',').includes(k)])),
+  competence: 8, complexity: 'high', optionalIntegrations: Object.fromEntries(['graphify', 'headroom', 'jev', 'rea'].map(k => [k, !disabled.split(',').includes(k)])),
   testCommand: [process.execPath, '-e', "if(require('node:fs').readFileSync('answer.txt','utf8')!=='42\\n')process.exit(1)"],
 }, new ApprovalVerifier('fixture-host', authority.publicKey));
 try {

@@ -1,5 +1,34 @@
 # Implementation ledger
 
+2026-10-24: the accumulated host/tool-selection/AGY and opt-in resource-routing
+work was locally deployed with verified backups. Jev/REA dependency remediation
+was included after the release audit. See the [deployment record](local-deployment-2026-10-24.md)
+for artifact identity, exact host scope, recovery and verification limitations.
+This supersedes earlier deployment-pending statements; live resource activation
+and provider certification remain pending. Exact-SHA remote CI is separate evidence.
+
+2026-10-23: [resource contracts](identity-resource-contracts.md#scoped-dispatch-consumption--fourth-increment-2026-10-23)
+now have opt-in adapter/scheduler consumption of exact scoped observations,
+dispatch-time revalidation, reviewer refresh, and durable assignment provenance.
+Legacy configurations remain compatible. Trusted live scoped collectors, provider
+context certification, deployment and exact-SHA three-platform CI remain open.
+Windows build and 198 Node tests passed; the secret scan (163 files) and production
+dependency audit were clean. AGY's bounded review timed out, so independent approval
+is not claimed. See the resource-contract verification section for scope.
+
+2026-10-21: [task-based tool selection](task-tool-selection.md) now shares one
+selector across CLI/MCP, delegated prompts and automatic runtime context packaging,
+with durable selection records. Recommendations are not execution/authentication
+evidence. ChatGPT web is excluded by user choice. Build/typecheck and 184 Node tests
+passed locally; remote three-platform CI is not claimed.
+
+2026-10-18 development increment: [host integration readiness](host-integration-readiness.md)
+adds scoped five-host configuration reconciliation, Jev environment/stdin forwarding,
+optional pinned REA, and a Claude Code bootstrap. Registration, authenticated function,
+active-session loading and runtime scheduling remain distinct. No public release or
+cross-platform live-host certification is implied. See the
+[dated verification report](host-integration-verification-2026-10-21.md).
+
 Current hardening slice: [Phase 0 foundation hardening](phase-0-hardening.md).
 The dated verification below is historical, not a claim that the current HEAD's
 three-platform CI passed. The next approved slice after Phase 0 is Identity and
@@ -7,8 +36,8 @@ Resource Contracts; the earlier next-slice recommendation below is superseded.
 Its [initial increments](identity-resource-contracts.md) now supply validated
 resource metadata, exact capability matching, revisioned environment persistence
 and scoped observations with expiration and configuration-sensitive invalidation.
-Scheduler/adapter consumption of these resource contracts remains pending;
-Phase-0 live-install follow-up CI is also still open.
+Opt-in scheduler/adapter consumption is implemented locally; live scoped collectors
+and Phase-0 live-install follow-up CI are still open.
 
 Updated: 2026-10-03. Status: **unpublished development foundation; roadmap incomplete**.
 Plan: [accepted architecture](phase-1-plan.md). Baseline: `3bce3a4` / v0.3.0,

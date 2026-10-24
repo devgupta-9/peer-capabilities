@@ -26,7 +26,9 @@ test('installed npm artifact uses tested runtime dependencies and authorizes leg
     const installed = path.join(prefix, 'node_modules/@devgupta/peer-capabilities');
     const requireInstalled = createRequire(path.join(installed, 'package.json'));
     const lock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
-    for (const name of ['@modelcontextprotocol/server', 'zod']) {
+    assert.ok(existsSync(path.join(installed, 'scripts/start-jev.ps1')), 'Jev launcher must be in the npm artifact');
+    assert.ok(existsSync(path.join(installed, 'dist/host-configuration-cli.js')), 'Host reconciler must be in the npm artifact');
+    for (const name of ['@modelcontextprotocol/server', 'zod', 'smol-toml']) {
       let directory = path.dirname(requireInstalled.resolve(name));
       let manifest;
       while (directory !== path.dirname(directory)) {

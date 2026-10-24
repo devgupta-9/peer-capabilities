@@ -10,3 +10,5 @@ Accepted for Phase 1; implementation and certification status live separately in
 - [Adapter certification and support levels](006-adapter-certification.md)
 - [Trusted host approval boundary](007-trusted-approval-boundary.md)
 - [Foundation path identity and secret policy](008-foundation-identity-and-secret-policy.md)
+- [Scoped host configuration reconciliation](009-host-configuration-reconciliation.md)
+- [Task selection versus execution authority](010-task-tool-selection.md)

@@ -10,6 +10,8 @@ published or certified, and requires Node 24+. See ../docs/runtime-guide.md and
 
 ## Contract
 
+- `select_task_tools` returns deterministic optional-tool recommendations and prerequisites, without execution or permission grants. The same selector runs in delegated prompts and governed runtime contexts. See [task tool selection](../docs/architecture/task-tool-selection.md).
+
 - peer_capabilities discovers CLI versions, Antigravity models, and the local Codex model catalog with supported efforts and restrictions. It does not spend a model turn. A cached Codex catalog does not prove current account access.
 - delegate_peer requires caller, task, exact model, effort, and selectionReason. cwd, mode, deliverable, and timeoutSeconds refine the work package.
 - The lead chooses the model and reasoning effort per operation. No capability tiers, implicit default model, tier environment variables, promotions, or automatic fallback exist.
@@ -67,7 +69,13 @@ npm test
 Binary overrides: PEER_CODEX_BIN and PEER_AGY_BIN. The installer supplies absolute executable paths for both. PEER_CODEX_BIN must name a native executable, not a PowerShell or cmd shim.
 Optional policy overrides: PEER_AGENTS_ALLOWED_ROOTS (additional explicit scope), PEER_AGENTS_WORKSPACE_MODE (AUTO_ACTIVE or STRICT_ROOTS), PEER_AGENTS_DENIED_ROOTS, and PEER_AGENTS_POLICY_FILE. Root lists use the OS path delimiter. Without a mode, a nonempty legacy allowed-root list remains strict. The default model exclusion policy is peer-agents/policy.json.
 Codex discovery reads models_cache.json from CODEX_HOME when configured, otherwise ~/.codex. Missing or invalid catalogs fail closed; refresh model discovery through Codex before delegating.
-Antigravity discovery runs agy models for fresh selections.
+Antigravity discovery runs agy models for fresh selections. Explicit delegation
+does not run that catalog command again: a slow or unavailable catalog must not
+prevent invoking a model the lead has already selected. The bridge still validates
+the exact slug, supported effort and model/effort suffix; the provider CLI validates
+model existence and account access. Unknown models fail there without substitution.
+`antigravityModelValidation: PROVIDER_CLI` labels successful dispatches using this
+path. Codex catalog restrictions, workspace policy and tool permissions are unchanged.
 
 ## Registration
 
@@ -127,6 +135,17 @@ Canonical policy: %USERPROFILE%\.ai-rules\MASTER-AGENTS-REFERENCE.md.
 Runtime entry files: ~/.codex/AGENTS.md and ~/.gemini/GEMINI.md.
 
 The lead may enable an already-configured MCP needed for the task using the host's supported control, preserving permissions, credentials, and unrelated settings. Verify discovery after reconnect; restore temporary activation when safe. This bridge does not toggle other MCPs or grant authority for their external operations.
+
+## Experimental resource-bound runtime
+
+Task-runtime adapter configurations may opt in with
+`resources: { workerId, bindingIds }`. This requires an existing environment catalog
+and fresh trusted observations for the exact model binding, role and effort; it
+does not enroll accounts, authenticate, or switch provider contexts. Missing or
+stale evidence blocks bound choices. Generic `verify` cannot certify this mode.
+Configurations without `resources` retain their existing behavior, including the
+compatibility MCP bridge. See the [resource-contract implementation notes](../docs/architecture/identity-resource-contracts.md)
+for the trust boundary, current limitations and collector work still required.
 
 ## Direct MCP verification
 

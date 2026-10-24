@@ -44,9 +44,16 @@ Historical v0.3.0 requirements: Windows, PowerShell 7, Git, Node.js 20+, npm, uv
 | `peer-agents` | 0.3.0 | Bidirectional Codex/Antigravity delegation with exact model selection | Codex and Antigravity |
 | `graphify` | 0.9.63 | Local project graph extraction and query | Codex and Antigravity |
 | `headroom` | 0.37.0 | MCP tools plus the local Codex proxy on `127.0.0.1:8787` | Codex and Antigravity |
-| `jev` | 0.5.0 | Provider-backed decision support; requires `TYPESAFE_API_KEY` | Codex and Antigravity |
+| `jev` | 0.14.5 | Provider-backed decision support; requires provider-owned authentication | Codex and Antigravity |
 
-`integrations.json` is the portable, secret-free registration source. Validation also inventories other MCPs already configured on the machine, but this project does not claim to install or manage those unrelated servers.
+`integrations.json` is the portable, secret-free registration source. Optional **REA 6.5.0** is pinned in `tools/rea` (`install.ps1 -IncludeRea`), with a Zod 4.6.7 security override; native analysis engines are separate prerequisites. Validation also inventories other MCPs already configured on the machine, but this project does not claim to install or manage those unrelated servers.
+
+The [host-readiness guide](docs/architecture/host-integration-readiness.md) covers separate Codex, Antigravity CLI/IDE, Claude Code and Claude Desktop scopes, Jev credential delivery, preview/apply/rollback and remaining limitations. Registration does not guarantee model use, authentication, a project graph or active-session reload. Claude currently gets optional tools, not a supported peer-agent adapter.
+
+Development [task-based tool selection](docs/architecture/task-tool-selection.md)
+is available through `select_task_tools` and `peer-capabilities tools select`.
+Runtime prompts select optional tools automatically; hosts retain execution and
+permission control. Selection is not proof of usage. ChatGPT web is out of scope.
 
 ### Plugins
 
@@ -74,7 +81,7 @@ The installer:
 - builds and tests `peer-agents` and installs the pinned Jev runtime;
 - installs Graphify and Headroom from version-pinned, hash-verified transitive dependency locks;
 - deploys canonical Codex, Antigravity, and orchestrator rules with drift detection and backups;
-- registers all four managed MCPs in both hosts using absolute executable paths;
+- reconciles the four base MCPs (plus opt-in REA) in Codex and Antigravity CLI using absolute entrypoints, backups and preserved permissions/disable flags;
 - records both `PEER_AGY_BIN` and a native, directly launchable `PEER_CODEX_BIN`;
 - configures and starts the local Headroom proxy;
 - performs fresh-process MCP discovery and calls `peer_capabilities` to prove both peer CLIs are launchable.

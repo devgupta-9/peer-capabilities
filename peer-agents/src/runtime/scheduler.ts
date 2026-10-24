@@ -9,6 +9,9 @@ export function selectAgent(choices: Choice[], request: {
     c.contextWindow >= request.requiredContext && c.efforts.includes(c.effort) &&
     ['AUTHENTICATED', 'NOT_REQUIRED'].includes(c.authentication) &&
     ['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(c.availability) &&
+    (!c.resource || c.resource.scope.role === request.role && c.resource.scope.effort === c.effort &&
+      (!request.exact || c.resource.scope.effort === request.exact.effort) &&
+      Date.parse(c.resource.expiresAt) > Date.now()) &&
     !request.excluded?.includes(c.agent) &&
     (!request.exact || c.agent === request.exact.agent && c.model === request.exact.model && c.efforts.includes(request.exact.effort)));
   if (!eligible.length) throw new Error('No eligible agent/model/effort; no implicit fallback');

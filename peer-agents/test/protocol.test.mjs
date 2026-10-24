@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { callBridge } from '../scripts/mcp-call.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,14 @@ test('fresh MCP schema requires explicit model and effort without legacy routing
   for (const key of ['model', 'effort', 'selectionReason']) assert.ok(tool.inputSchema.required.includes(key));
   assert.equal(tool.inputSchema.properties.tier, undefined);
   assert.equal(tool.inputSchema.additionalProperties, false);
+  assert.ok(result.tools.some(t => t.name === 'select_task_tools'));
+});
+test('bridge exposes the same non-executing task selector as the host-neutral surface', async () => {
+  const response = await callBridge('select_task_tools', { objective: 'Explain architecture' });
+  const plan = JSON.parse(response.content[0].text);
+  assert.equal(plan.decisions.find(d => d.integration === 'graphify').status, 'SELECTED');
+  assert.equal(plan.execution, 'HOST_GATED');
+  assert.equal(plan.verification, 'NOT_PERFORMED');
 });
 test('legacy calls fail validation instead of selecting an implicit model', async () => {
   const result = await callBridge('delegate_peer', { caller: 'codex', task: 'test', tier: 'STANDARD' });
@@ -38,6 +47,28 @@ test('invalid task limit configuration falls back safely', async () => {
     env: { PEER_AGENTS_MAX_TASK_CHARS: 'not-a-number' },
   });
   assert.ok(result.tools.some((tool) => tool.name === 'delegate_peer'));
+});
+
+test('explicit AGY delegation reaches invocation even when its catalog command cannot work', async () => {
+  const repo = await mkdtemp(path.join(tmpdir(), 'peer-no-catalog-'));
+  execFileSync('git', ['init', '-q', repo]);
+  try {
+    // Node is deliberately not AGY: both "models" and invocation are unsupported.
+    // The invocation-specific error proves discovery was not a prerequisite;
+    // no provider account, network, or successful inference is simulated here.
+    const result = await callBridge('delegate_peer', {
+      caller: 'codex', cwd: repo, task: 'No-op diagnostic; do not change files.', mode: 'READ_ONLY',
+      model: 'gemini-fixture-high', effort: 'high', selectionReason: 'Test catalog-independent explicit dispatch',
+      timeoutSeconds: 30,
+    }, { cwd: repo, env: { PEER_AGY_BIN: process.execPath, PEER_AGENTS_DEPTH: '0',
+      PEER_AGENTS_WORKSPACE_MODE: 'STRICT_ROOTS', PEER_AGENTS_ALLOWED_ROOTS: repo } });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(result.isError, true);
+    assert.match(payload.error, /Antigravity exited/);
+    assert.match(payload.error, /--input-format/);
+    assert.doesNotMatch(payload.error, /model discovery/);
+    assert.equal(payload.model, 'gemini-fixture-high');
+  } finally { await rm(repo, { recursive: true, force: true }); }
 });
 
 test('workspace preflight detects missing roots even when both CLIs launch', async () => {

@@ -14,6 +14,14 @@ shared_local_servers:
   - graphify
   - headroom
   - jev
+optional_local_servers:
+  - rea
+host_scopes:
+  - codex
+  - antigravity-cli
+  - antigravity-ide
+  - claude-code
+  - claude-desktop
 notes:
   - Other integrations may intentionally differ between hosts.
   - On-demand disabled servers remain disabled until a task needs them.

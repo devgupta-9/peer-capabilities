@@ -92,13 +92,23 @@ export function validateChoice(
     if (!agyModels.includes(model)) {
       throw new Error('Model is not in fresh Antigravity model discovery. Refresh peer_capabilities and select an exact listed model.');
     }
-    if (!['low', 'medium', 'high'].includes(effort)) {
-      throw new Error(`Antigravity supports low, medium, or high effort; received ${effort}.`);
-    }
-    const suffix = model.match(/-(low|medium|high)$/i)?.[1]?.toLowerCase();
-    if (suffix && suffix !== effort) {
-      throw new Error(`Antigravity model suffix ${suffix} and requested effort ${effort} disagree.`);
-    }
+    return validatePinnedAntigravityChoice(model, effort);
+  }
+  return { model, effort, fallback: false };
+}
+
+/** Validate an explicit invocation pin. The provider CLI validates model existence
+ * and account access; catalog enumeration is discovery, not an execution dependency. */
+export function validatePinnedAntigravityChoice(model: string, effort: Effort): ModelChoice {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(model) || /^(auto|default)$/i.test(model)) {
+    throw new Error('Antigravity requires an explicit model slug, not automatic/default routing.');
+  }
+  if (!['low', 'medium', 'high'].includes(effort)) {
+    throw new Error(`Antigravity supports low, medium, or high effort; received ${effort}.`);
+  }
+  const suffix = model.match(/-(low|medium|high)$/i)?.[1]?.toLowerCase();
+  if (suffix && suffix !== effort) {
+    throw new Error(`Antigravity model suffix ${suffix} and requested effort ${effort} disagree.`);
   }
   return { model, effort, fallback: false };
 }

@@ -1,3 +1,12 @@
+# Unpublished development — 2026-10-24
+
+- Add scoped, previewed host configuration reconciliation with backups, rollback, and preserved host permissions and credentials.
+- Share task-based optional-tool recommendations across the CLI, MCP, delegated prompts and runtime context; recommendations do not execute tools or grant authority.
+- Remove redundant Antigravity catalog discovery from exact pinned delegation; retain provider validation, explicit failures and no model substitution.
+- Consume opt-in exact resource observations in scheduling and dispatch, including expiry, configuration invalidation and durable assignment provenance. Live scoped collectors remain pending.
+- Pin Zod 4.6.7 in the bridge and override REA 6.5.0's vulnerable Zod pin; upgrade the isolated Jev runtime to 0.14.5 and refresh REA's fast-uri lock. Preserve Jev's explicit `JEV_MCP_MODEL` setting through its launcher.
+- This remains private `0.4.0-dev.0` development work, not an npm publication or production/platform certification.
+
 # v0.3.0 — 2026-09-24
 
 - Export IMPLEMENT patches directly through Git, verify them before cleanup, hash them, and preserve recovery artifacts on failure.

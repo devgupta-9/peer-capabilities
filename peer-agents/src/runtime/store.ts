@@ -6,19 +6,22 @@ import { database, transaction } from './database.js';
 import { canonical, contentHash, digest } from './identity.js';
 import type { Choice, TaskState } from './contracts.js';
 import { approvalGrantSchema } from './approval.js';
+import { taskToolPlanSchema } from '../tool-selection.js';
+import { resourceAssignmentSchema } from './resource-routing.js';
 
 const text = z.string().min(1);
 const choice = z.object({
   agent: text, model: text, effort: text, efforts: z.array(text), roles: z.array(z.enum(['lead', 'reviewer', 'specialist', 'consultant'])),
   competence: z.number().finite(), cost: z.number().nonnegative(), latency: z.number().nonnegative(),
   contextWindow: z.number().positive(), availability: text, authentication: text, provider: text, quotaPool: text,
+  resource: resourceAssignmentSchema.optional(),
 }).strict();
 const schemas = {
   TASK_CREATED: z.object({ objective: text, repository: text, baseline: text, manifestDigest: text, environmentDigest: text }).strict(),
   ASSIGNED: choice,
   NOTE_RECORDED: z.object({ note: text }).strict(),
   WORKTREE_CREATED: z.object({ path: text, baseSha: text }).strict(),
-  CONTEXT_PACKAGED: z.object({ hash: text, kind: z.enum(['FULL', 'DELTA']), evidence: z.array(text) }).strict(),
+  CONTEXT_PACKAGED: z.object({ hash: text, kind: z.enum(['FULL', 'DELTA']), evidence: z.array(text), role: text.optional(), toolSelection: taskToolPlanSchema.optional() }).strict(),
   LEAD_FINISHED: z.object({ evidence: text }).strict(),
   TEST_RECORDED: z.object({ phase: text, passed: z.boolean(), command: z.array(text).min(1), evidence: text }).strict(),
   REVIEW_RECORDED: z.object({ agent: text.optional(), outcome: z.enum(['APPROVE', 'REQUEST_CHANGES', 'BLOCKED', 'UNAVAILABLE']), findings: z.array(text), reason: text.optional() }).strict(),

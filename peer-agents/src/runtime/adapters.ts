@@ -8,11 +8,14 @@ import { runCapture } from '../process.js';
 import { antigravityCommand, discoverAntigravityModels, parseAntigravityResult } from '../antigravity.js';
 import { childEnvironment, redact, assertNonSecret } from '../security.js';
 import type { AgentAdapter, AgentResult, Authentication, Availability, Choice, Invocation, Observation } from './contracts.js';
+import { bindResourceChoices, resourceBindingSchema, type ResourceSource, type ResourceContext } from './resource-routing.js';
+import { digest } from './identity.js';
 
 export const adapterConfigSchema = z.object({
   id: z.enum(['codex', 'antigravity']), executable: z.string().min(1).optional(),
   experimental: z.boolean().default(false),
   sandboxMode: z.enum(['required', 'permissions-only']).default('required'),
+  resources: resourceBindingSchema.optional(),
   profiles: z.array(z.object({
     model: z.string().min(1), effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']),
     competence: z.number().min(0).max(10), cost: z.number().nonnegative(),
@@ -69,15 +72,17 @@ const reviewSchema = z.object({ outcome: z.enum(['APPROVE', 'REQUEST_CHANGES', '
 export class ProviderAdapter implements AgentAdapter {
   readonly id: Provider;
   private config: z.output<typeof adapterConfigSchema>;
-  constructor(config: Config, private verification?: Observation, private capture: typeof runCapture = runCapture) {
+  constructor(config: Config, private verification?: Observation, private capture: typeof runCapture = runCapture,
+    private resourceSource?: ResourceSource) {
     assertNonSecret(config);
     this.config = adapterConfigSchema.parse(config); this.id = config.id;
+    if (this.config.resources && !resourceSource) throw new Error('Bound adapter requires resource state');
   }
   loginInstructions(): string {
     return this.id === 'codex' ? 'Run the official codex login command, then verify the selected model.'
       : 'Run an interactive agy session and complete official sign-in, then verify the selected model.';
   }
-  async discover(): Promise<{ observation: Observation; choices: Choice[] }> {
+  async discover(): Promise<{ observation: Observation; choices: Choice[]; resourceContext?: ResourceContext }> {
     const observation: Observation = { component: this.id, presence: 'DISCOVERED', authentication: 'UNKNOWN',
       verification: 'UNVERIFIED', observedAt: new Date().toISOString(), scope: 'CLI discovery only' };
     let command: string;
@@ -100,7 +105,7 @@ export class ProviderAdapter implements AgentAdapter {
     } else {
       agyModels = (await discoverAntigravityModels({ command, capture: this.capture })()).models;
     }
-    if (this.verification?.verification === 'VERIFIED' && this.verification.version === observation.version &&
+    if (!this.config.resources && this.verification?.verification === 'VERIFIED' && this.verification.version === observation.version &&
       this.verification.expiresAt && Date.parse(this.verification.expiresAt) > Date.now()) {
       observation.authentication = 'AUTHENTICATED';
       observation.verification = 'VERIFIED'; observation.scope = this.verification.scope;
@@ -119,9 +124,16 @@ export class ProviderAdapter implements AgentAdapter {
         provider: this.id, quotaPool: this.id + ':provider-owned-account',
       });
     }
+    if (this.config.resources) {
+      const resourceContext = { frontendVersion: digest({ version: observation.version }),
+        configurationDigest: digest({ config: this.config, command }) };
+      return { observation, resourceContext,
+        choices: bindResourceChoices(this.resourceSource!, this.id, this.config.resources, resourceContext, choices) };
+    }
     return { observation, choices };
   }
   async verify(cwd: string): Promise<Observation> {
+    if (this.config.resources) throw new Error('Resource-bound adapters require a trusted scoped verification collector; legacy verify is not scoped');
     const discovery = await this.discover();
     const choice = discovery.choices[0];
     if (!choice) throw new Error('No valid exact model profile to verify');
@@ -140,11 +152,16 @@ export class ProviderAdapter implements AgentAdapter {
     const depth = Number(process.env.PEER_AGENTS_DEPTH ?? 0);
     if (!Number.isSafeInteger(depth) || depth !== 0) return { availability: 'POLICY_BLOCKED', response: 'Recursive dispatch prohibited' };
     const { choices } = await this.discover();
-    if (!choices.some(c => c.model === input.choice.model && c.efforts.includes(input.choice.effort)
-      && c.authentication === 'AUTHENTICATED' && c.availability !== 'POLICY_BLOCKED')) {
+    const selected = choices.find(c => c.agent === this.id && c.agent === input.choice.agent &&
+      c.model === input.choice.model && c.efforts.includes(input.choice.effort)
+      && (!this.config.resources || c.roles.includes(input.role) && c.resource?.scope.effort === input.choice.effort)
+      && digest(c.resource ?? null) === digest(input.choice.resource ?? null)
+      && ['AUTHENTICATED', 'NOT_REQUIRED'].includes(c.authentication)
+      && ['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(c.availability));
+    if (!selected) {
       return { availability: 'POLICY_BLOCKED', response: 'Exact choice/authentication/experimental policy not satisfied' };
     }
-    return this.invoke(input);
+    return this.invoke({ ...input, choice: { ...selected, effort: input.choice.effort } });
   }
   private async invoke(input: Invocation): Promise<AgentResult> {
     const prompt = input.role === 'reviewer'

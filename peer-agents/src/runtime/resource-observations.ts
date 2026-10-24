@@ -9,12 +9,12 @@ import type { ResourceCatalog } from './resources.js';
 
 const label = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
-const scopeSchema = z.object({
+export const resourceObservationScopeSchema = z.object({
   workerId: label, bindingId: label, role: z.enum(['lead', 'reviewer', 'specialist', 'consultant']),
   effort: label, frontendVersion: label, configurationDigest: hash,
 }).strict();
 const observationSchema = z.object({
-  scope: scopeSchema, resourceRevision: z.number().int().positive(),
+  scope: resourceObservationScopeSchema, resourceRevision: z.number().int().positive(),
   authentication: z.enum(['UNKNOWN', 'NOT_REQUIRED', 'AUTH_REQUIRED', 'AUTHENTICATED']),
   availability: availability.or(z.literal('UNKNOWN')),
   verification: z.enum(['UNVERIFIED', 'VERIFIED', 'UNAVAILABLE']),
@@ -26,7 +26,7 @@ const observationSchema = z.object({
     ['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(o.availability)))
   .refine(o => o.evidence.method !== 'DISCOVERY' || o.authentication !== 'AUTHENTICATED');
 
-export type ResourceObservationScope = z.infer<typeof scopeSchema>;
+export type ResourceObservationScope = z.infer<typeof resourceObservationScopeSchema>;
 export type ResourceObservation = z.infer<typeof observationSchema>;
 export type ResourceObservationResult =
   | { status: 'CURRENT'; observation: ResourceObservation }
@@ -96,7 +96,7 @@ export class ResourceObservations {
     });
   }
   read(value: unknown): ResourceObservationResult {
-    const scope = parse(scopeSchema, value);
+    const scope = parse(resourceObservationScopeSchema, value);
     return transaction(this.db, () => {
       const observation = this.latest(scope);
       if (!observation) return { status: 'UNKNOWN' };

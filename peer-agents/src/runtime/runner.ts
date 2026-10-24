@@ -9,6 +9,7 @@ import { exportPatch, fingerprint, integratePatch, prepareWorktree, repositoryRo
 import { selectAgent } from './scheduler.js';
 import { TaskStore } from './store.js';
 import { ApprovalVerifier } from './approval.js';
+import { selectTaskTools } from '../tool-selection.js';
 
 export type RuntimePolicy = {
   policyVersion: string; manifestDigest: string; mode: Mode; competence: number;
@@ -70,7 +71,14 @@ export class Runtime {
     const window = choice.contextWindow;
     return contextPackage({
       task: { ...state }, role, question: state.objective,
-      constraints: ['Do not publish, commit, access credentials or delegate to other agents.', 'Work only in the assigned repository.', 'Reviewers must not change files.'],
+      constraints: ['Do not publish, commit, access credentials or delegate to other agents.', 'Work only in the assigned repository.', 'Reviewers must not change files.',
+        'Tool selection is optional advice, not permission or proof of use. Discover tools in this session, preserve disabled settings, and continue with direct inspection/tests if unavailable.'],
+      toolSelection: selectTaskTools({ objective: state.objective,
+        ...(role === 'reviewer' ? { needs: ['PATCH_REVIEW'] } : {}),
+        evidenceAvailable: evidence.length > 0,
+        outputBytes: evidence.reduce((sum, item) => sum + Buffer.byteLength(item.text, 'utf8'), 0),
+        protectedMaterial: true,
+      }, this.policy.optionalIntegrations),
       evidence, events: this.store.events(state.id).map(e => ({ ...e })),
       policyVersion: this.policy.policyVersion, fingerprint: state.baseline, graphVersion: null,
       allocation: { window, occupied: 0, host: Math.ceil(window * .05), output: Math.ceil(window * .1),
@@ -101,7 +109,7 @@ export class Runtime {
       const isolated = await prepareWorktree(repository);
       state = this.append(state, 'WORKTREE_CREATED', isolated);
       const context = this.package(state, choice, 'lead');
-      state = this.append(state, 'CONTEXT_PACKAGED', { hash: context.hash, kind: context.kind, evidence: [] });
+      state = this.append(state, 'CONTEXT_PACKAGED', { hash: context.hash, kind: context.kind, evidence: [], role: 'lead', toolSelection: context.toolSelection });
       const result = await this.adapters.find(a => a.id === choice.agent)!.execute({
         id: randomUUID(), taskId: state.id, cwd: isolated.path, role: 'lead', choice, prompt: JSON.stringify(context),
       });
@@ -113,13 +121,16 @@ export class Runtime {
       state = this.append(state, 'LEAD_FINISHED', { evidence });
       state = await this.observedTest(state, 'lead-verification');
       let reviewer: Choice | undefined;
-      try { reviewer = selectAgent(environment.choices, { role: 'reviewer', competence: this.policy.competence,
+      const reviewEnvironment = await this.environment();
+      try { reviewer = selectAgent(reviewEnvironment.choices, { role: 'reviewer', competence: this.policy.competence,
         complexity: this.policy.complexity, requiredContext: 2048, excluded: [choice.agent] }); } catch { /* single-agent is first-class */ }
       if (reviewer) {
         const reviewPatch = await exportPatch(repository, isolated.path, isolated.baseSha);
         const reviewContext = this.package(state, reviewer, 'reviewer', [{
           id: reviewPatch.hash, text: await readFile(reviewPatch.path, 'utf8'), mandatory: true,
         }]);
+        state = this.append(state, 'CONTEXT_PACKAGED', { hash: reviewContext.hash, kind: reviewContext.kind,
+          evidence: [reviewPatch.hash], role: 'reviewer', toolSelection: reviewContext.toolSelection });
         const beforeReview = await fingerprint(isolated.path);
         const review = await this.adapters.find(a => a.id === reviewer!.agent)!.execute({
           id: randomUUID(), taskId: state.id, cwd: isolated.path, role: 'reviewer', choice: reviewer,
@@ -195,9 +206,11 @@ export class Runtime {
       independentReview: state.reviews.some(r => r.agent !== state.assignment?.agent && r.outcome === 'APPROVE'),
       reviews: state.reviews, degraded: state.degraded,
       humanDecisions: state.integration ? [state.integration] : [],
+      toolSelections: this.store.events(id).filter(e => e.type === 'CONTEXT_PACKAGED').map(e => e.payload),
+      toolsExecutedByRuntime: [],
       limitations: [
         'Local execution evidence is not adapter/platform release certification.',
-        'Optional intelligence connectors and learned routing are not used by this baseline.',
+        'Optional tools are selected automatically, not executed by this runtime. Host tool calls require separate evidence. Learned routing is not enabled.',
         ...(!state.reviews.some(r => r.outcome === 'APPROVE') ? ['No independent review; compensating tests are not consensus.'] : []),
         'Worktrees and patches are retained for reconciliation; no destructive cleanup.',
       ],
