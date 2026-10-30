@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { runCapture } from '../process.js';
 import { redact } from '../security.js';
-import type { AgentAdapter, Choice, Mode, TaskState } from './contracts.js';
+import type { AgentAdapter, AgentResult, Choice, Mode, TaskState } from './contracts.js';
 import { contextPackage } from './context.js';
 import { digest } from './identity.js';
 import { exportPatch, fingerprint, integratePatch, prepareWorktree, repositoryRoot, repositoryIdentity } from './repository.js';
@@ -17,6 +17,9 @@ export type RuntimePolicy = {
   exact?: { agent: string; model: string; effort: string };
   optionalIntegrations?: Record<string, boolean>;
 };
+function failureReason(result: AgentResult): string {
+  return result.availability + (result.resourceFeedback ? '; scoped feedback: ' + result.resourceFeedback : '');
+}
 export class Runtime {
   constructor(private store: TaskStore, private adapters: AgentAdapter[], private policy: RuntimePolicy,
     private approvalAuthority?: ApprovalVerifier) {
@@ -114,7 +117,7 @@ export class Runtime {
         id: randomUUID(), taskId: state.id, cwd: isolated.path, role: 'lead', choice, prompt: JSON.stringify(context),
       });
       if (result.availability !== 'AVAILABLE') {
-        state = this.append(state, 'TASK_BLOCKED', { reason: 'Lead unavailable: ' + result.availability + '; reconcile preserved worktree before reassignment' });
+        state = this.append(state, 'TASK_BLOCKED', { reason: 'Lead unavailable: ' + failureReason(result) + '; reconcile preserved worktree before reassignment' });
         return;
       }
       const evidence = this.store.evidence({ text: redact(result.response), classification: 'PROJECT', source: 'agent-report:' + choice.agent, version: await fingerprint(isolated.path) });
@@ -139,7 +142,11 @@ export class Runtime {
         if (await fingerprint(isolated.path) !== beforeReview) throw new Error('Reviewer modified repository; integration blocked');
         state = this.append(state, 'REVIEW_RECORDED', review.availability === 'AVAILABLE' && review.review
           ? { agent: reviewer.agent, ...review.review }
-          : { agent: reviewer.agent, outcome: 'UNAVAILABLE', findings: [], reason: review.availability });
+          : { agent: reviewer.agent, outcome: 'UNAVAILABLE', findings: [], reason: failureReason(review) });
+        if (review.resourceFeedback === 'FAILED') {
+          state = this.append(state, 'TASK_BLOCKED', { reason: 'Scoped failure feedback was not persisted; repair environment storage and revalidate before further dispatch' });
+          return;
+        }
       } else state = this.append(state, 'REVIEW_RECORDED', { outcome: 'UNAVAILABLE', findings: [], reason: 'No independent eligible agent installed' });
       if (state.reviews.some(r => r.outcome === 'BLOCKED' || r.outcome === 'REQUEST_CHANGES')) {
         state = this.append(state, 'TASK_BLOCKED', { reason: 'Unresolved material review findings' }); return;

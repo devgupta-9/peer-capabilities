@@ -8,8 +8,11 @@ import { runCapture } from '../process.js';
 import { antigravityCommand, discoverAntigravityModels, parseAntigravityResult } from '../antigravity.js';
 import { childEnvironment, redact, assertNonSecret } from '../security.js';
 import type { AgentAdapter, AgentResult, Authentication, Availability, Choice, Invocation, Observation } from './contracts.js';
-import { bindResourceChoices, resourceBindingSchema, type ResourceSource, type ResourceContext } from './resource-routing.js';
+import { bindResourceChoices, inspectResourceChoices, resourceNextAction, resourceBindingSchema,
+  type ResourceSource, type ResourceContext, type ResourceDiagnostic } from './resource-routing.js';
 import { digest } from './identity.js';
+import type { EnvironmentManager } from './environment.js';
+import { recordInvocationFailure } from './resource-feedback.js';
 
 export const adapterConfigSchema = z.object({
   id: z.enum(['codex', 'antigravity']), executable: z.string().min(1).optional(),
@@ -24,6 +27,12 @@ export const adapterConfigSchema = z.object({
 }).strict();
 type Config = z.input<typeof adapterConfigSchema>;
 type Provider = 'codex' | 'antigravity';
+type AdapterResourceStore = ResourceSource & Partial<Pick<EnvironmentManager, 'recordResourceObservation' | 'canWriteResourceObservations'>>;
+export type ResourceDoctorReport = {
+  frontend: Provider; status: 'ELIGIBLE' | 'BLOCKED' | 'NOT_RESOURCE_BOUND';
+  reason?: string; nextAction?: string; catalogRevision?: number;
+  diagnostics: ResourceDiagnostic[];
+};
 
 export function normalizeFailure(message: string, timedOut: boolean): Availability {
   if (timedOut) return 'TIMEOUT';
@@ -72,8 +81,9 @@ const reviewSchema = z.object({ outcome: z.enum(['APPROVE', 'REQUEST_CHANGES', '
 export class ProviderAdapter implements AgentAdapter {
   readonly id: Provider;
   private config: z.output<typeof adapterConfigSchema>;
+  private resourceFeedbackFailed = false;
   constructor(config: Config, private verification?: Observation, private capture: typeof runCapture = runCapture,
-    private resourceSource?: ResourceSource) {
+    private resourceSource?: AdapterResourceStore) {
     assertNonSecret(config);
     this.config = adapterConfigSchema.parse(config); this.id = config.id;
     if (this.config.resources && !resourceSource) throw new Error('Bound adapter requires resource state');
@@ -82,7 +92,7 @@ export class ProviderAdapter implements AgentAdapter {
     return this.id === 'codex' ? 'Run the official codex login command, then verify the selected model.'
       : 'Run an interactive agy session and complete official sign-in, then verify the selected model.';
   }
-  async discover(): Promise<{ observation: Observation; choices: Choice[]; resourceContext?: ResourceContext }> {
+  private async discoverProfiles(): Promise<{ observation: Observation; choices: Choice[]; resourceContext?: ResourceContext }> {
     const observation: Observation = { component: this.id, presence: 'DISCOVERED', authentication: 'UNKNOWN',
       verification: 'UNVERIFIED', observedAt: new Date().toISOString(), scope: 'CLI discovery only' };
     let command: string;
@@ -127,10 +137,35 @@ export class ProviderAdapter implements AgentAdapter {
     if (this.config.resources) {
       const resourceContext = { frontendVersion: digest({ version: observation.version }),
         configurationDigest: digest({ config: this.config, command }) };
-      return { observation, resourceContext,
-        choices: bindResourceChoices(this.resourceSource!, this.id, this.config.resources, resourceContext, choices) };
+      return { observation, resourceContext, choices };
     }
     return { observation, choices };
+  }
+  async discover() {
+    if (this.resourceFeedbackFailed) throw new Error('RESOURCE_FEEDBACK_FAILED');
+    const result = await this.discoverProfiles();
+    if (this.config.resources && result.resourceContext) {
+      result.choices = bindResourceChoices(this.resourceSource!, this.id, this.config.resources, result.resourceContext, result.choices);
+    }
+    return result;
+  }
+  /** Discovery commands only. Never invokes a model or persists/renews evidence. */
+  async resourceDoctor(): Promise<ResourceDoctorReport> {
+    if (!this.config.resources) return { frontend: this.id, status: 'NOT_RESOURCE_BOUND', diagnostics: [],
+      nextAction: 'Legacy adapter configuration has no resource binding. No scoped readiness claim is made.' };
+    try {
+      if (this.resourceFeedbackFailed) throw new Error('RESOURCE_FEEDBACK_FAILED');
+      const result = await this.discoverProfiles();
+      if (!result.resourceContext) return { frontend: this.id, status: 'BLOCKED', reason: 'CLI_UNAVAILABLE', diagnostics: [],
+        nextAction: 'Check the official CLI installation and configured executable; no model was invoked.' };
+      const report = inspectResourceChoices(this.resourceSource!, this.id, this.config.resources, result.resourceContext, result.choices);
+      return { frontend: this.id, status: report.choices.length ? 'ELIGIBLE' : 'BLOCKED',
+        catalogRevision: report.catalogRevision, diagnostics: report.diagnostics };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const reason = Object.hasOwn(resourceNextAction, message) ? message as keyof typeof resourceNextAction : 'INSPECTION_FAILED';
+      return { frontend: this.id, status: 'BLOCKED', reason, nextAction: resourceNextAction[reason], diagnostics: [] };
+    }
   }
   async verify(cwd: string): Promise<Observation> {
     if (this.config.resources) throw new Error('Resource-bound adapters require a trusted scoped verification collector; legacy verify is not scoped');
@@ -151,6 +186,7 @@ export class ProviderAdapter implements AgentAdapter {
   async execute(input: Invocation): Promise<AgentResult> {
     const depth = Number(process.env.PEER_AGENTS_DEPTH ?? 0);
     if (!Number.isSafeInteger(depth) || depth !== 0) return { availability: 'POLICY_BLOCKED', response: 'Recursive dispatch prohibited' };
+    if (this.resourceFeedbackFailed) return { availability: 'POLICY_BLOCKED', response: 'Resource feedback failed; environment repair and revalidation required' };
     const { choices } = await this.discover();
     const selected = choices.find(c => c.agent === this.id && c.agent === input.choice.agent &&
       c.model === input.choice.model && c.efforts.includes(input.choice.effort)
@@ -161,7 +197,25 @@ export class ProviderAdapter implements AgentAdapter {
     if (!selected) {
       return { availability: 'POLICY_BLOCKED', response: 'Exact choice/authentication/experimental policy not satisfied' };
     }
-    return this.invoke({ ...input, choice: { ...selected, effort: input.choice.effort } });
+    if (this.config.resources && (!this.resourceSource?.recordResourceObservation ||
+      this.resourceSource.canWriteResourceObservations?.() !== true)) {
+      return { availability: 'POLICY_BLOCKED', response: 'Bound execution requires writable resource feedback state' };
+    }
+    const result = await this.invoke({ ...input, choice: { ...selected, effort: input.choice.effort } });
+    if (!this.config.resources || !selected.resource || ['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(result.availability)) return result;
+    try {
+      const source = this.resourceSource!;
+      const resourceFeedback = await recordInvocationFailure({
+        readResources: revision => source.readResources(revision),
+        getResourceObservation: scope => source.getResourceObservation(scope),
+        recordResourceObservation: (value, expected) => source.recordResourceObservation!(value, expected),
+      }, selected.resource, result.availability);
+      return { ...result, resourceFeedback };
+    } catch {
+      this.resourceFeedbackFailed = true;
+      return { availability: 'EXECUTION_ERROR', resourceFeedback: 'FAILED',
+        response: 'Provider invocation failed and scoped failure state could not be recorded; environment repair and revalidation required' };
+    }
   }
   private async invoke(input: Invocation): Promise<AgentResult> {
     const prompt = input.role === 'reviewer'

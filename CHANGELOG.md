@@ -1,3 +1,12 @@
+# Unpublished development — 2026-10-30
+
+- Add read-only scoped resource doctor with shared dispatch eligibility checks.
+- Add trusted verification coordination: durable pending state, exact context/check validation, cancellation and conditional completion. Real provider collectors remain gated pending context-binding certification.
+- Persist exact-scope invocation failures, preserve newer observations, and block dispatch when failure feedback cannot be stored. Successful task calls do not renew proof.
+- Preserve failure-feedback outcomes in task/review history; retain compensating verification for recorded reviewer outages.
+- Deploy the private runtime to existing local peer-bridge hosts with verified backups. Repair one stale Antigravity IDE Codex executable reference; retain all permissions, credentials and optional-runtime settings.
+- Windows release verification: 235/235 tests passed. This remains private `0.4.0-dev.0`, not an npm publication or live-provider certification.
+
 # Unpublished development — 2026-10-24
 
 - Add scoped, previewed host configuration reconciliation with backups, rollback, and preserved host permissions and credentials.

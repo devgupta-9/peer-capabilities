@@ -28,9 +28,26 @@ async function contents(file: string): Promise<string | null> {
 export class EnvironmentManager {
   private db: DatabaseSync;
   private identity: DirectoryIdentity;
-  constructor(file: string, private root: string) {
+  private readOnly: boolean;
+  constructor(file: string, private root: string, options: { readOnly?: boolean } = {}) {
+    this.readOnly = options.readOnly ?? false;
     this.identity = directoryIdentity(root);
     this.root = this.identity.canonicalPath;
+    if (options.readOnly) {
+      if (!existsSync(file)) throw new Error('ENVIRONMENT_NOT_INITIALIZED');
+      if (lstatSync(file).isSymbolicLink()) throw new Error('Redirected environment database scope');
+      this.db = new DatabaseSync(file, { readOnly: true, timeout: 5000 });
+      try {
+        const schema = this.db.prepare('SELECT domain, version FROM schema_meta').all();
+        const scope = this.db.prepare('SELECT root FROM environment_scope WHERE id=1').get();
+        const pin = this.db.prepare('SELECT identity FROM environment_identity WHERE id=1').get();
+        if (schema.length !== 1 || schema[0].domain !== 'environment' || schema[0].version !== 1 ||
+          scope?.root !== this.root || pin?.identity !== this.identity.key) throw new Error();
+      } catch {
+        this.db.close(); throw new Error('ENVIRONMENT_INSPECTION_FAILED');
+      }
+      return; // No initialization, migrations, ownership changes or observation writes.
+    }
     // Inspect existing scope without writes: detection is not a migration.
     if (existsSync(file)) {
       if (lstatSync(file).isSymbolicLink()) throw new Error('Redirected environment database scope');
@@ -77,9 +94,13 @@ export class EnvironmentManager {
     assertIdentity(this.identity);
     return new ResourceState(this.db).restore(sourceRevision, expectedRevision);
   }
-  recordResourceObservation(value: unknown): ResourceObservation {
+  recordResourceObservation(value: unknown, expectedLatestDigest?: string): ResourceObservation {
     assertIdentity(this.identity);
-    return new ResourceObservations(this.db).record(value);
+    return new ResourceObservations(this.db).record(value, expectedLatestDigest);
+  }
+  canWriteResourceObservations(): boolean {
+    assertIdentity(this.identity);
+    return !this.readOnly;
   }
   getResourceObservation(scope: unknown): ResourceObservationResult {
     assertIdentity(this.identity);

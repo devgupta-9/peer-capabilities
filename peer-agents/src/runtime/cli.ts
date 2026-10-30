@@ -39,6 +39,7 @@ export async function main(argv: string[]): Promise<void> {
   if (v.help || command === 'help') {
     console.log('Tool selection: tools select --objective TEXT | --input FILE; tools mcp (host-neutral local stdio). Selection is advice, never execution or permission.');
     console.log('Projects: project add <absolute-root> | remove <absolute-root> | list | check <absolute-path>\nEnrollment is explicit additional trust, not required for a host-reported active Git workspace.');
+    console.log('Resources: resources doctor --repo REPOSITORY --config FILE [--state-dir DIRECTORY]\nRead-only scoped eligibility inspection. Runs CLI discovery only; no model calls, enrollment, login or evidence renewal.');
     console.log('Peer Capabilities (development; not release-certified)\nCommands: setup doctor update sync repair rollback uninstall version discover verify run resume status mcp\nEnvironment: --manifest FILE --root DIRECTORY [--state-dir DIRECTORY] [--apply]\nTasks: --repo REPOSITORY --config FILE [--objective TEXT] [--id UUID] [--checkpoint-only]\nsetup/update/sync/repair preview changes unless --apply. CLI/MCP integration is disabled pending trusted host approval. Inspect the verified patch for deliberate manual integration. No npm postinstall mutations.');
     return;
   }
@@ -93,15 +94,40 @@ export async function main(argv: string[]): Promise<void> {
     } finally { manager.close(); }
     return;
   }
-  if (!v.config || !v.repo) throw new Error('Task commands require --config and --repo');
+  const resourceDoctor = command === 'resources';
+  if (resourceDoctor && (positionals[1] !== 'doctor' || positionals.length !== 2 || v.apply)) {
+    throw new Error('Use resources doctor; this surface is read-only and accepts no --apply');
+  }
+  if (!v.config || !v.repo) throw new Error('Task and resource commands require --config and --repo');
   const raw = await json(v.config); assertNonSecret(raw);
   const config = configSchema.parse(raw);
   const root = await repositoryRoot(path.resolve(v.repo));
   const environmentPath = path.join(path.resolve(v['state-dir'] ?? defaultEnvironmentDirectory(root)), 'environment.sqlite');
-  const environment = new EnvironmentManager(environmentPath, root);
+  let environment: EnvironmentManager;
+  try { environment = new EnvironmentManager(environmentPath, root, { readOnly: resourceDoctor }); }
+  catch (error) {
+    if (!resourceDoctor) throw error;
+    const reason = error instanceof Error && error.message === 'ENVIRONMENT_NOT_INITIALIZED'
+      ? 'ENVIRONMENT_NOT_INITIALIZED' : 'ENVIRONMENT_INSPECTION_FAILED';
+    print({ schemaVersion: 1, inspection: 'RESOURCE_ELIGIBILITY', status: 'BLOCKED', reason,
+      nextAction: 'Select an existing environment state directory for this repository. Doctor does not initialize or repair state.',
+      releaseSupported: false }); process.exitCode = 1; return;
+  }
   let store: TaskStore | undefined;
   let serving = false;
   try {
+    if (resourceDoctor) {
+      const agents = [];
+      for (const configAgent of config.agents) {
+        agents.push(await new ProviderAdapter(configAgent, undefined, undefined, environment).resourceDoctor());
+      }
+      const status = agents.some(a => a.status === 'BLOCKED') ? 'BLOCKED'
+        : agents.some(a => a.status === 'ELIGIBLE') ? 'ELIGIBLE' : 'NOT_RESOURCE_BOUND';
+      print({ schemaVersion: 1, inspection: 'RESOURCE_ELIGIBILITY', status, agents, releaseSupported: false,
+        limitation: 'Snapshot only. Eligibility is not dispatch approval, provider-account attestation or tool/competence certification.' });
+      if (status !== 'ELIGIBLE') process.exitCode = 1;
+      return;
+    }
     const adapters = config.agents.map(c => new ProviderAdapter(c, environment.getObservation(c.id), undefined, environment));
     if (command === 'discover' || command === 'verify') {
       const results = [];

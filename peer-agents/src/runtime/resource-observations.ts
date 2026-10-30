@@ -19,7 +19,7 @@ const observationSchema = z.object({
   availability: availability.or(z.literal('UNKNOWN')),
   verification: z.enum(['UNVERIFIED', 'VERIFIED', 'UNAVAILABLE']),
   observedAt: z.iso.datetime(), expiresAt: z.iso.datetime(),
-  evidence: z.object({ method: z.enum(['DISCOVERY', 'OFFICIAL_STATUS', 'FUNCTIONAL_PROBE']), reference: hash }).strict(),
+  evidence: z.object({ method: z.enum(['DISCOVERY', 'OFFICIAL_STATUS', 'FUNCTIONAL_PROBE', 'INVOCATION']), reference: hash }).strict(),
 }).strict().refine(o => Date.parse(o.expiresAt) > Date.parse(o.observedAt))
   .refine(o => o.verification !== 'VERIFIED' || (o.evidence.method === 'FUNCTIONAL_PROBE' &&
     ['AUTHENTICATED', 'NOT_REQUIRED'].includes(o.authentication) &&
@@ -74,7 +74,8 @@ export class ResourceObservations {
       return observation;
     } catch { throw new Error('CORRUPT_RESOURCE_OBSERVATION'); }
   }
-  record(value: unknown): ResourceObservation {
+  record(value: unknown, expectedLatestDigest?: string): ResourceObservation {
+    if (expectedLatestDigest !== undefined && !hash.safeParse(expectedLatestDigest).success) throw new Error('INVALID_RESOURCE_OBSERVATION');
     const observation = parse(observationSchema, value);
     if (Date.parse(observation.observedAt) > Date.now()) throw new Error('INVALID_RESOURCE_OBSERVATION');
     return transaction(this.db, () => {
@@ -82,6 +83,9 @@ export class ResourceObservations {
       if (!current || current.revision !== observation.resourceRevision) throw new Error('RESOURCE_REVISION_CONFLICT');
       if (!fingerprint(current.catalog, observation.scope)) throw new Error('INVALID_RESOURCE_OBSERVATION');
       const previous = this.latest(observation.scope);
+      if (expectedLatestDigest !== undefined && (!previous || digest(previous) !== expectedLatestDigest)) {
+        throw new Error('RESOURCE_OBSERVATION_CONFLICT');
+      }
       if (previous && Date.parse(previous.observedAt) >= Date.parse(observation.observedAt)) throw new Error('STALE_RESOURCE_OBSERVATION');
       if (!this.initialized()) this.db.exec(`
         CREATE TABLE resource_observation_schema(version INTEGER PRIMARY KEY) STRICT;

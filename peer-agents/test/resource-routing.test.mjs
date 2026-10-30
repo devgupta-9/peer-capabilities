@@ -1,14 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { ProviderAdapter } from '../dist/runtime/adapters.js';
 import { EnvironmentManager } from '../dist/runtime/environment.js';
 import { selectAgent } from '../dist/runtime/scheduler.js';
 import { Runtime } from '../dist/runtime/runner.js';
+import { inspectResourceChoices } from '../dist/runtime/resource-routing.js';
+import { recordInvocationFailure } from '../dist/runtime/resource-feedback.js';
+import { digest } from '../dist/runtime/identity.js';
 import { runtimeFixture } from './fixtures/runtime-fixture.mjs';
 
 const catalog = () => ({ schemaVersion: 1,
@@ -177,4 +181,348 @@ test('runtime refreshes reviewer availability after the lead finishes', async ()
     assert.equal(reviewerCalls, 0); assert.equal(runtime.report(state.id).independentReview, false);
     assert.ok(state.tests.some(t => t.phase === 'compensating-verification' && t.passed));
   } finally { await run.close(); }
+});
+
+test('resource doctor explains exact eligibility using dispatch evidence without invoking or renewing it', async t => {
+  const f = await fixture(t); const observation = f.record();
+  const reader = new EnvironmentManager(path.join(f.root, 'environment.sqlite'), f.root, { readOnly: true });
+  try {
+    const adapter = new ProviderAdapter(config(), undefined, f.capture, reader);
+    const report = await adapter.resourceDoctor();
+    assert.equal(report.status, 'ELIGIBLE');
+    assert.equal(report.catalogRevision, 1);
+    const eligible = report.diagnostics.filter(d => d.eligible);
+    assert.deepEqual(eligible.map(d => d.scope), (await adapter.discover()).choices.map(c => c.resource.scope));
+    assert.equal(eligible[0].observation.expiresAt, observation.expiresAt);
+    assert.equal(report.diagnostics.find(d => d.scope.role === 'reviewer').reason, 'UNKNOWN');
+    assert.equal(report.diagnostics.find(d => d.scope.role === 'consultant').reason, 'CAPABILITY_MISMATCH');
+    const output = JSON.stringify(report);
+    for (const privateValue of ['official-profile', 'shared-pool', 'FUNCTIONAL_PROBE', 'a'.repeat(64)]) assert.equal(output.includes(privateValue), false);
+    assert.equal(f.calls(), 0);
+    assert.deepEqual(reader.getResourceObservation(f.scope('lead')).observation, observation);
+    assert.throws(() => reader.saveResources(catalog(), 1), /readonly|read.only/i);
+    assert.throws(() => reader.recordResourceObservation({ ...observation, observedAt: new Date().toISOString() }), /readonly|read.only/i);
+  } finally { reader.close(); }
+});
+
+test('resource doctor distinguishes missing, expired, authentication, quota and unverified evidence', async t => {
+  const scenarios = [
+    ['UNKNOWN', undefined],
+    ['EXPIRED', { observedAt: new Date(Date.now() - 60000).toISOString(), expiresAt: new Date(Date.now() - 1000).toISOString() }],
+    ['AUTH_REQUIRED', { authentication: 'AUTH_REQUIRED', availability: 'AUTH_REQUIRED', verification: 'UNAVAILABLE' }],
+    ['UNAVAILABLE', { availability: 'QUOTA_EXHAUSTED', verification: 'UNAVAILABLE' }],
+    ['AUTH_UNKNOWN', { authentication: 'UNKNOWN', verification: 'UNVERIFIED' }],
+    ['UNVERIFIED', { verification: 'UNVERIFIED' }],
+  ];
+  for (const [reason, observation] of scenarios) {
+    const f = await fixture(t); if (observation) f.record('lead', observation);
+    const report = await f.adapter.resourceDoctor();
+    assert.equal(report.status, 'BLOCKED', reason);
+    const diagnostic = report.diagnostics.find(d => d.scope?.role === 'lead');
+    assert.equal(diagnostic.reason, reason);
+    assert.ok(diagnostic.nextAction.length > 20);
+    assert.deepEqual((await f.adapter.discover()).choices, []);
+    if (reason === 'UNAVAILABLE') assert.equal(diagnostic.observation.availability, 'QUOTA_EXHAUSTED');
+    assert.equal(f.calls(), 0);
+  }
+});
+
+test('doctor detects policy changes and rollback invalidation without reauthorizing old evidence', async t => {
+  const f = await fixture(t); f.record();
+  const changed = catalog(); changed.accounts[0].policy = 'RESERVE'; f.environment.saveResources(changed, 1);
+  assert.equal((await f.adapter.resourceDoctor()).diagnostics.find(d => d.scope.role === 'lead').reason, 'RESOURCE_POLICY_BLOCKED');
+  f.environment.restoreResources(1, 2);
+  assert.equal((await f.adapter.resourceDoctor()).diagnostics.find(d => d.scope.role === 'lead').reason, 'CONFIGURATION_CHANGED');
+  const newConfig = config(); newConfig.profiles[0].cost++;
+  assert.equal((await new ProviderAdapter(newConfig, undefined, f.capture, f.environment).resourceDoctor())
+    .diagnostics.find(d => d.scope.role === 'lead').reason, 'UNKNOWN');
+  assert.equal(f.calls(), 0);
+});
+
+test('doctor reports discovery and binding failures without leaking raw errors or repairing state', async t => {
+  const f = await fixture(t);
+  const empty = config(); empty.profiles = [];
+  assert.equal((await new ProviderAdapter(empty, undefined, f.capture, f.environment).resourceDoctor()).diagnostics[0].reason, 'NO_DISCOVERED_PROFILE');
+  const blocked = config(); blocked.experimental = false;
+  assert.equal((await new ProviderAdapter(blocked, undefined, f.capture, f.environment).resourceDoctor()).diagnostics[0].reason, 'DISCOVERY_BLOCKED');
+  const unavailable = async () => { throw new Error('synthetic-private-local-path'); };
+  assert.equal((await new ProviderAdapter(config(), undefined, unavailable, f.environment).resourceDoctor()).reason, 'CLI_UNAVAILABLE');
+  const source = { readResources: () => { throw new Error('synthetic-private-local-path'); } };
+  const broken = await new ProviderAdapter(config(), undefined, f.capture, source).resourceDoctor();
+  assert.equal(broken.reason, 'INSPECTION_FAILED');
+  assert.equal(JSON.stringify(broken).includes('synthetic-private-local-path'), false);
+  assert.equal((await new ProviderAdapter(config(), undefined, f.capture, { readResources: () => null }).resourceDoctor()).reason, 'RESOURCE_CATALOG_REQUIRED');
+  const missing = config(); missing.resources.workerId = 'missing';
+  assert.equal((await new ProviderAdapter(missing, undefined, f.capture, f.environment).resourceDoctor()).reason, 'RESOURCE_NOT_FOUND');
+  const ambiguous = catalog(); ambiguous.bindings.push({ ...ambiguous.bindings[0], id: 'other' }); f.environment.saveResources(ambiguous, 1);
+  const both = config(); both.resources.bindingIds.push('other');
+  assert.equal((await new ProviderAdapter(both, undefined, f.capture, f.environment).resourceDoctor()).reason, 'AMBIGUOUS_RESOURCE_BINDING');
+  assert.equal(f.calls(), 0);
+});
+
+test('fresh discovery denial wins over scoped success and resource changes abort the entire diagnostic result', async t => {
+  const f = await fixture(t); f.record(); const choice = (await f.adapter.discover()).choices[0];
+  const inspect = (source, candidate) => inspectResourceChoices(source, 'antigravity', config().resources,
+    { frontendVersion: choice.resource.scope.frontendVersion, configurationDigest: choice.resource.scope.configurationDigest }, [candidate]);
+  const denied = inspect(f.environment, { ...choice, authentication: 'AUTH_REQUIRED' });
+  assert.equal(denied.choices.length, 0); assert.equal(denied.diagnostics[0].reason, 'AUTH_REQUIRED');
+  let reads = 0;
+  const changing = { readResources: () => ({ ...f.environment.readResources(), revision: ++reads }),
+    getResourceObservation: s => f.environment.getResourceObservation(s) };
+  assert.throws(() => inspect(changing, choice), /RESOURCE_REVISION_CHANGED/);
+  const db = new DatabaseSync(path.join(f.root, 'environment.sqlite'));
+  try { db.exec("UPDATE resource_observations SET digest='invalid'"); } finally { db.close(); }
+  const report = await f.adapter.resourceDoctor();
+  assert.equal(report.reason, 'INSPECTION_FAILED'); assert.deepEqual(report.diagnostics, []);
+  await assert.rejects(f.adapter.discover(), /CORRUPT_RESOURCE_OBSERVATION/);
+});
+
+test('unbound resource doctor makes no provider calls or scoped readiness claims', async () => {
+  const unbound = config(); delete unbound.resources;
+  const report = await new ProviderAdapter(unbound, undefined, async () => { throw new Error('Must not run'); }).resourceDoctor();
+  assert.equal(report.status, 'NOT_RESOURCE_BOUND'); assert.deepEqual(report.diagnostics, []);
+});
+
+test('CLI resource doctor is read-only and missing state does not create an environment or task database', async () => {
+  const run = await runtimeFixture();
+  const cli = fileURLToPath(new URL('../bin/peer-capabilities.mjs', import.meta.url));
+  try {
+    const configFile = path.join(run.root, '.git', 'resource-doctor.json');
+    await writeFile(configFile, JSON.stringify({ agents: [config()], policy: run.policy }));
+    const state = path.join(run.root, '.git', 'doctor-state');
+    const args = ['resources', 'doctor', '--repo', run.root, '--config', configFile, '--state-dir', state];
+    const call = extra => spawnSync(process.execPath, [cli, ...args, ...extra], { encoding: 'utf8' });
+    const missing = call([]);
+    assert.equal(missing.status, 1, missing.stderr);
+    assert.equal(JSON.parse(missing.stdout).reason, 'ENVIRONMENT_NOT_INITIALIZED');
+    await assert.rejects(readdir(state), { code: 'ENOENT' });
+    const manager = new EnvironmentManager(path.join(state, 'environment.sqlite'), run.root); manager.close();
+    const file = path.join(state, 'environment.sqlite'); const before = await readFile(file);
+    const result = call([]);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stdout).agents[0].reason, 'RESOURCE_CATALOG_REQUIRED');
+    assert.deepEqual(await readFile(file), before);
+    const db = new DatabaseSync(file, { readOnly: true });
+    try {
+      assert.equal(db.prepare('SELECT count(*) AS n FROM observations').get().n, 0);
+      assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'resource%'").get().n, 0);
+    } finally { db.close(); }
+    const names = await readdir(state); assert.equal(names.includes('tasks.sqlite'), false);
+    const rejected = call(['--apply']); assert.equal(rejected.status, 1); assert.equal(rejected.stdout, '');
+    assert.deepEqual(await readFile(file), before, 'Rejected apply cannot change environment state');
+  } finally { await run.close(); }
+});
+
+test('read-only environment inspection rejects mismatched scope and incomplete schema without mutation', async t => {
+  const f = await fixture(t); f.close();
+  const file = path.join(f.root, 'environment.sqlite'); const before = await readFile(file);
+  assert.throws(() => new EnvironmentManager(file, tmpdir(), { readOnly: true }), /ENVIRONMENT_INSPECTION_FAILED/);
+  assert.deepEqual(await readFile(file), before);
+  const partial = path.join(f.root, 'partial.sqlite');
+  const db = new DatabaseSync(partial); db.exec('CREATE TABLE unrelated(value TEXT)'); db.close();
+  const original = await readFile(partial);
+  assert.throws(() => new EnvironmentManager(partial, f.root, { readOnly: true }), /ENVIRONMENT_INSPECTION_FAILED/);
+  assert.deepEqual(await readFile(partial), original);
+});
+
+function failureAdapter(f, failure = {}, source = f.environment, beforeResult = () => {}) {
+  let calls = 0;
+  const adapter = new ProviderAdapter(config(), undefined, async (command, args, options) => {
+    if (args[0] === '--version' || args[0] === 'models') return f.capture(command, args, options);
+    calls++; await beforeResult();
+    return { code: 1, stdout: '', stderr: 'quota exhausted', timedOut: false, cancelled: false,
+      stdoutTruncated: false, stderrTruncated: false, durationMs: 1, ...failure };
+  }, source);
+  return { adapter, calls: () => calls,
+    invoke: (choice, role = 'lead') => adapter.execute({ id: 'fixture', taskId: 'fixture', cwd: f.root, role, choice, prompt: 'Fixture only' }) };
+}
+
+test('invocation quota failure durably revokes exact evidence without expiring back into success', async t => {
+  const f = await fixture(t); f.record();
+  const selected = selectAgent((await f.adapter.discover()).choices, request);
+  const bad = failureAdapter(f); const result = await bad.invoke(selected);
+  assert.equal(result.availability, 'QUOTA_EXHAUSTED'); assert.equal(result.resourceFeedback, 'RECORDED');
+  const observation = f.environment.getResourceObservation(f.scope('lead')).observation;
+  assert.equal(observation.verification, 'UNAVAILABLE'); assert.equal(observation.authentication, 'AUTHENTICATED');
+  assert.equal(observation.evidence.method, 'INVOCATION');
+  assert.deepEqual((await f.adapter.discover()).choices, [], 'A separate adapter also sees the failure');
+  assert.equal((await bad.invoke(selected)).availability, 'POLICY_BLOCKED'); assert.equal(bad.calls(), 1);
+  const reopened = new EnvironmentManager(path.join(f.root, 'environment.sqlite'), f.root, { readOnly: true });
+  try { assert.deepEqual(reopened.getResourceObservation(f.scope('lead')).observation, observation); }
+  finally { reopened.close(); }
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(observation.expiresAt) + 1 });
+  assert.equal(f.environment.getResourceObservation(f.scope('lead')).status, 'EXPIRED');
+  assert.deepEqual((await f.adapter.discover()).choices, [], 'Expiration never revives historical success');
+});
+
+test('auth, service, malformed, cancelled and timed out invocations persist normalized negative state', async t => {
+  for (const [failure, expected] of [
+    [{ stderr: 'please log in' }, 'AUTH_REQUIRED'],
+    [{ stderr: '503 service unavailable' }, 'SERVICE_UNAVAILABLE'],
+    [{ code: 0, stderr: '', stdout: '{unfinished' }, 'EXECUTION_ERROR'],
+    [{ stderr: '', timedOut: true }, 'TIMEOUT'],
+    [{ stderr: '', cancelled: true }, 'TIMEOUT'],
+  ]) {
+    const f = await fixture(t); f.record();
+    const selected = selectAgent((await f.adapter.discover()).choices, request);
+    const result = await failureAdapter(f, failure).invoke(selected);
+    assert.equal(result.availability, expected); assert.equal(result.resourceFeedback, 'RECORDED');
+    const observation = f.environment.getResourceObservation(f.scope('lead')).observation;
+    assert.equal(observation.authentication, expected === 'AUTH_REQUIRED' ? 'AUTH_REQUIRED' : 'AUTHENTICATED');
+    assert.equal(observation.availability, expected); assert.equal(observation.verification, 'UNAVAILABLE');
+    assert.equal(result.review, undefined);
+  }
+});
+
+test('success and preflight rejection cannot mint, renew or revoke scoped proof', async t => {
+  const f = await fixture(t); const original = f.record();
+  const selected = selectAgent((await f.adapter.discover()).choices, request);
+  assert.equal((await f.invoke(selected)).availability, 'AVAILABLE');
+  assert.deepEqual(f.environment.getResourceObservation(f.scope('lead')).observation, original);
+  assert.equal((await f.invoke(selected, 'reviewer')).availability, 'POLICY_BLOCKED');
+  assert.deepEqual(f.environment.getResourceObservation(f.scope('lead')).observation, original);
+  assert.throws(() => f.environment.recordResourceObservation({ ...original,
+    observedAt: new Date().toISOString(), evidence: { method: 'INVOCATION', reference: 'b'.repeat(64) },
+  }), /INVALID_RESOURCE_OBSERVATION/, 'Invocation receipts cannot certify capability');
+  await assert.rejects(recordInvocationFailure(f.environment, selected.resource, 'AVAILABLE'), /FAILURE_REQUIRED/);
+});
+
+test('failure feedback does not propagate across role, effort or binding', async t => {
+  const f = await fixture(t); const original = f.record(); const review = f.record('reviewer');
+  const expanded = catalog(); expanded.bindings.push({ ...expanded.bindings[0], id: 'other' });
+  f.environment.saveResources(expanded, 1);
+  const otherEffort = f.environment.recordResourceObservation({ ...original, resourceRevision: 2, scope: { ...original.scope, effort: 'low' } });
+  const otherBinding = f.environment.recordResourceObservation({ ...original, resourceRevision: 2, scope: { ...original.scope, bindingId: 'other' } });
+  const selected = selectAgent((await f.adapter.discover()).choices, request);
+  assert.equal((await failureAdapter(f).invoke(selected)).resourceFeedback, 'RECORDED');
+  assert.equal(f.environment.getResourceObservation(original.scope).observation.resourceRevision, 2);
+  for (const untouched of [review, otherEffort, otherBinding]) {
+    assert.deepEqual(f.environment.getResourceObservation(untouched.scope).observation, untouched);
+  }
+});
+
+test('concurrent newer verification or failure wins over an old invocation receipt', async t => {
+  for (const availability of ['AVAILABLE', 'RATE_LIMITED']) {
+    const f = await fixture(t); f.record();
+    const selected = selectAgent((await f.adapter.discover()).choices, request); let newer;
+    const bad = failureAdapter(f, {}, f.environment, () => {
+      newer = f.record('lead', { availability, verification: availability === 'AVAILABLE' ? 'VERIFIED' : 'UNAVAILABLE',
+        observedAt: new Date(Date.now() - 1000).toISOString() });
+    });
+    const result = await bad.invoke(selected);
+    assert.equal(result.availability, 'QUOTA_EXHAUSTED'); assert.equal(result.resourceFeedback, 'SUPERSEDED');
+    assert.deepEqual(f.environment.getResourceObservation(f.scope('lead')).observation, newer);
+  }
+});
+
+test('catalog changes and rollback during failure feedback cannot attribute failure to a new context', async t => {
+  for (const rollback of [false, true]) {
+    const f = await fixture(t); f.record();
+    const selected = selectAgent((await f.adapter.discover()).choices, request); let injected = false;
+    const source = {
+      readResources: () => {
+        const changed = catalog(); changed.authContexts[0].handle = 'different-profile';
+        f.environment.saveResources(changed, 1);
+        if (rollback) f.environment.restoreResources(1, 2);
+        injected = true; return f.environment.readResources();
+      },
+      getResourceObservation: scope => f.environment.getResourceObservation(scope),
+      recordResourceObservation: () => assert.fail('Changed context must not receive invocation evidence'),
+    };
+    assert.equal(await recordInvocationFailure(source, selected.resource, 'AUTH_REQUIRED'), 'SUPERSEDED');
+    assert.equal(injected, true); assert.equal(f.environment.getResourceObservation(f.scope('lead')).status, 'CONFIGURATION_CHANGED');
+  }
+});
+
+test('transactional failure write preserves an observation that arrives after final validation', async t => {
+  const f = await fixture(t); f.record(); const selected = selectAgent((await f.adapter.discover()).choices, request);
+  let newer, injected = false;
+  const source = { readResources: () => f.environment.readResources(),
+    getResourceObservation: scope => f.environment.getResourceObservation(scope),
+    recordResourceObservation: (value, expected) => {
+      injected = true; newer = f.record('lead', { observedAt: new Date(Date.now() - 1000).toISOString() });
+      return f.environment.recordResourceObservation(value, expected);
+    } };
+  assert.equal(await recordInvocationFailure(source, selected.resource, 'AUTH_REQUIRED'), 'SUPERSEDED');
+  assert.equal(injected, true); assert.deepEqual(f.environment.getResourceObservation(f.scope('lead')).observation, newer);
+});
+
+test('bound execution rejects read-only or absent writers before calling the provider', async t => {
+  const f = await fixture(t); f.record(); const selected = selectAgent((await f.adapter.discover()).choices, request);
+  const readOnly = new EnvironmentManager(path.join(f.root, 'environment.sqlite'), f.root, { readOnly: true });
+  try {
+    for (const source of [readOnly, { readResources: () => f.environment.readResources(),
+      getResourceObservation: scope => f.environment.getResourceObservation(scope) }]) {
+      const bad = failureAdapter(f, {}, source);
+      assert.equal((await bad.invoke(selected)).availability, 'POLICY_BLOCKED'); assert.equal(bad.calls(), 0);
+    }
+  } finally { readOnly.close(); }
+});
+
+test('failure persistence errors stop further dispatch and expose no raw error', async t => {
+  const f = await fixture(t); f.record(); const selected = selectAgent((await f.adapter.discover()).choices, request);
+  const source = { readResources: () => f.environment.readResources(),
+    getResourceObservation: scope => f.environment.getResourceObservation(scope), canWriteResourceObservations: () => true,
+    recordResourceObservation: () => { throw new Error('PRIVATE_DIAGNOSTIC_SENTINEL'); } };
+  const bad = failureAdapter(f, {}, source); const result = await bad.invoke(selected);
+  assert.equal(result.resourceFeedback, 'FAILED'); assert.equal(result.availability, 'EXECUTION_ERROR');
+  assert.equal(JSON.stringify(result).includes('PRIVATE_DIAGNOSTIC_SENTINEL'), false);
+  assert.equal((await bad.invoke(selected)).availability, 'POLICY_BLOCKED'); assert.equal(bad.calls(), 1);
+  await assert.rejects(bad.adapter.discover(), /RESOURCE_FEEDBACK_FAILED/);
+  assert.equal((await bad.adapter.resourceDoctor()).reason, 'RESOURCE_FEEDBACK_FAILED');
+});
+
+test('corrupt observations during invocation cannot be overwritten by failure feedback', async t => {
+  const f = await fixture(t); f.record(); const selected = selectAgent((await f.adapter.discover()).choices, request);
+  const bad = failureAdapter(f, {}, f.environment, () => {
+    const db = new DatabaseSync(path.join(f.root, 'environment.sqlite'));
+    try { db.exec("UPDATE resource_observations SET digest='corrupt'"); } finally { db.close(); }
+  });
+  assert.equal((await bad.invoke(selected)).resourceFeedback, 'FAILED');
+  assert.throws(() => f.environment.getResourceObservation(f.scope('lead')), /CORRUPT_RESOURCE_OBSERVATION/);
+});
+
+test('runtime preserves scoped failure status and blocks on reviewer feedback storage failure', async () => {
+  const run = await runtimeFixture();
+  try {
+    const reviewer = { id: 'reviewer', loginInstructions: () => 'Fixture',
+      discover: async () => {
+        const result = await run.adapters[0].discover();
+        return { ...result, choices: result.choices.map(c => ({ ...c, agent: 'reviewer', roles: ['reviewer'] })) };
+      }, execute: async () => ({ availability: 'EXECUTION_ERROR', resourceFeedback: 'FAILED', response: 'Withheld' }) };
+    const runtime = new Runtime(run.store, [...run.adapters, reviewer], run.policy);
+    const state = await runtime.start(run.root, 'Correct fixture answer', true);
+    assert.equal(state.status, 'BLOCKED'); assert.equal(state.checkpoint, undefined);
+    assert.match(state.reviews[0].reason, /scoped feedback: FAILED/);
+    assert.equal(state.tests.length, 1, 'Storage failure cannot continue as ordinary degraded review');
+    assert.equal(run.store.replay(state.id).status, 'BLOCKED');
+    assert.equal(runtime.report(state.id).independentReview, false);
+  } finally { await run.close(); }
+});
+
+test('runtime durably reports a real adapter lead failure and keeps its worktree', async t => {
+  const run = await runtimeFixture(); let f;
+  try {
+    f = await fixture(t, run.root); f.record(); const bad = failureAdapter(f);
+    const runtime = new Runtime(run.store, [bad.adapter], run.policy);
+    const state = await runtime.start(run.root, 'Correct fixture answer', true);
+    assert.equal(state.status, 'BLOCKED'); assert.match(state.notes[0], /QUOTA_EXHAUSTED; scoped feedback: RECORDED/);
+    assert.equal(await readFile(path.join(state.worktree, 'answer.txt'), 'utf8'), 'wrong\n');
+    assert.deepEqual(run.store.replay(state.id).notes, state.notes);
+  } finally { f?.close(); await run.close(); }
+});
+
+test('persisted reviewer quota failure still allows explicit degraded verification', async t => {
+  const run = await runtimeFixture(); let f;
+  try {
+    f = await fixture(t, run.root); f.record('reviewer'); const bad = failureAdapter(f);
+    const runtime = new Runtime(run.store, [...run.adapters, bad.adapter], run.policy);
+    const state = await runtime.start(run.root, 'Correct fixture answer', true);
+    assert.equal(state.status, 'CHECKPOINTED'); assert.equal(state.degraded, true);
+    assert.equal(state.reviews[0].outcome, 'UNAVAILABLE');
+    assert.match(state.reviews[0].reason, /QUOTA_EXHAUSTED; scoped feedback: RECORDED/);
+    assert.equal(state.tests.length, 2); assert.equal(state.tests[1].phase, 'compensating-verification');
+    assert.equal(runtime.report(state.id).independentReview, false);
+    assert.equal(f.environment.getResourceObservation(f.scope('reviewer')).observation.availability, 'QUOTA_EXHAUSTED');
+  } finally { f?.close(); await run.close(); }
 });

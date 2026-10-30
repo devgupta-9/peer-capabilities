@@ -1,5 +1,48 @@
 # Implementation ledger
 
+2026-10-30: the scoped doctor, trusted collection coordinator and invocation-failure
+feedback increments were deployed locally under explicit user authorization.
+See the [deployment and recovery record](local-deployment-2026-10-30.md).
+Fresh Windows release verification passed **235/235** tests. Real provider
+collectors remain gated; this deployment does not enroll accounts or certify live
+provider context. The dated undeployed statements below describe earlier snapshots.
+
+2026-10-29: [invocation failure feedback](identity-resource-contracts.md#invocation-failure-feedback--seventh-increment-2026-10-29)
+revokes exact scoped proof after ordinary adapter failures. Conditional writes
+preserve newer evidence and changed resource identity. Success never renews proof;
+storage failure stops further dispatch and is retained in task/review reasons.
+The [provider-context audit](provider-context-audit-2026-10-29.md) inspected Codex
+0.154.0 and AGY 1.4.9 without account reads or model calls; it did not establish a
+certifiable invocation binding, so real scoped collectors remain unregistered.
+Windows build and **235/235** tests passed, including 13 new feedback regressions.
+The current-content secret scan checked 168 files without findings; production
+dependency audit reported zero vulnerabilities. Package dry-run includes both
+new runtime modules (89 files); `git diff --check` passed. Local review completed;
+no independent peer approval is claimed for this increment. No live configuration
+change, deployment, commit, push or remote CI is claimed.
+
+2026-10-28: [trusted scoped collection lifecycle](identity-resource-contracts.md#trusted-collection-lifecycle--sixth-increment-2026-10-28)
+adds durable pending observations, exact context/proof validation, bounded
+cancellation and atomic conditional completion. Interrupted or superseded attempts
+cannot revive old success. The internal coordinator uses trusted runtime collectors;
+live provider registration, context certification and dispatch revalidation remain
+gated. No live account changes, resource probes or deployment are included.
+Completed verification on 2026-10-29: Windows build and **222/222** tests passed,
+including 15 collector regressions; the package includes the new module (87 files).
+Secret scan (166 files) and production dependency audit passed. AGY's inline design
+review timed out; local review completed. No commit/push or remote CI is claimed.
+
+2026-10-28: the next identity/resource increment adds
+[scoped resource doctor](identity-resource-contracts.md#scoped-resource-doctor--fifth-increment-2026-10-28).
+It shares dispatch eligibility checks, reports exact-scope blockers and reads existing
+environment state without creating tasks, writing observations or invoking models.
+This is local development work; live scoped collectors/provider-context certification,
+deployment and exact-change remote CI remain pending.
+Windows build and **207/207** tests passed; package dry-run, current-content secret
+scan (164 files) and production dependency audit passed. AGY review was permission
+blocked; local review completed without an independent-approval claim. No deployment,
+commit or push was performed for this increment.
+
 2026-10-24: the accumulated host/tool-selection/AGY and opt-in resource-routing
 work was locally deployed with verified backups. Jev/REA dependency remediation
 was included after the release audit. See the [deployment record](local-deployment-2026-10-24.md)

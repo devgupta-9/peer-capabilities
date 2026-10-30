@@ -25,6 +25,7 @@ export type Invocation = {
 };
 export type AgentResult = {
   availability: Availability; response: string; session?: string;
+  resourceFeedback?: 'RECORDED' | 'SUPERSEDED' | 'FAILED';
   review?: { outcome: 'APPROVE' | 'REQUEST_CHANGES' | 'BLOCKED'; findings: string[] };
 };
 export interface AgentAdapter {

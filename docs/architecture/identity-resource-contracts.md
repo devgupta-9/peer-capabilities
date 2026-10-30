@@ -1,7 +1,7 @@
 # Identity and Resource Contracts
 
-Status: local development implementation, updated 2026-10-23. Not release-qualified.
-Scope: resource contracts, environment persistence, scoped observations and opt-in dispatch consumption.
+Status: local development implementation, updated 2026-10-29. Not release-qualified.
+Scope: resource contracts, environment persistence, scoped observations, opt-in dispatch consumption, read-only diagnostics and trusted collection lifecycle.
 
 ## Boundary and rationale
 
@@ -112,7 +112,8 @@ routing, evaluate cached invalidation generations without weakening rollback saf
 1. Implement trusted scoped collectors and certify how each frontend identifies
    its actual provider-owned context. Never promote discovery or a generic login
    result into model/role/tool verification. Keep this separate from credentials.
-2. Expose scoped inspection in doctor, then certify migration and live single/N-agent paths.
+2. Scoped doctor and the internal collection/failure-feedback lifecycle are now
+   implemented below. Certify migration and live single/N-agent paths next.
 3. Measure model-specific competence and tool evidence before treating declared
    profiles as certified capabilities. Learned routing remains deferred.
 
@@ -200,8 +201,9 @@ database available throughout task/MCP execution and closes command-scoped handl
 - No MCP-callable observation writer is introduced. Existing generic `verify`
   refuses resource-bound adapters; it cannot fabricate scoped verification.
 - Trusted live scoped collectors, tool-capability verification, and automatic
-  persistence of live invocation failures remain future increments. This slice
-  consumes observations; it does not silently generate or refresh them.
+  persistence of live invocation failures were future increments at this stage.
+  The seventh increment below adds failure persistence; live collection remains gated.
+  This slice consumes observations; it does not silently generate or refresh them.
 - Existing adapters without `resources` remain compatible. No live configuration,
   installed runtime, provider permission, or credential was changed in this task.
 - Verification uses disposable databases and deterministic adapter responses,
@@ -224,3 +226,193 @@ bounded text-only review (`gemini-3.8-flash-high`, high effort, 240-second budge
 timed out; no independent approval, fallback or automatic retry is claimed.
 Local review was completed. No live resource enrollment, scoped provider probe,
 configuration deployment, commit, push or remote CI run was performed.
+
+## Scoped resource doctor — fifth increment (2026-10-28)
+
+`resources doctor --repo REPOSITORY --config FILE [--state-dir DIRECTORY]`
+inspects existing environment state without enrolling resources, modifying policy,
+calling a model, or creating/renewing observations. `EnvironmentManager` has an
+explicit read-only open mode that verifies database domain/version and canonical
+root identity without initializing or migrating state. Missing, redirected, corrupt
+or incompatible state fails closed. Task state is not opened.
+
+`inspectResourceChoices` is the shared evaluator behind diagnostics and dispatch
+filtering. The report explains exact scope, current authentication/availability/
+verification and expiry, or missing/expired/configuration-invalidated evidence.
+It preserves account-policy, exact-effort, frontend and binding checks. Catalog
+revision changes abort inspection; corrupt evidence never falls back to old success.
+Only fixed error reasons and scoped non-secret metadata reach the report, without
+auth handles, account metadata, raw provider diagnostics or evidence contents.
+
+CLI discovery obtains current version/configuration matching keys. It is not a
+functional probe or account attestation. `ELIGIBLE` means a resource candidate
+passed the same filtering as discovery; it does not bypass task/repository/human
+gates, guarantee future availability, or certify declared competence/tools.
+Legacy unbound adapters report `NOT_RESOURCE_BOUND` without provider calls.
+
+This diagnostic slice precedes live collectors so missing trusted evidence is
+visible and actionable without fabricating it. Trusted provider-context certification,
+scoped functional collectors and live failure persistence remain follow-on work.
+No live account, host configuration or installed runtime is changed by this increment.
+
+### Verification — 2026-10-28
+
+Windows TypeScript build and full Node suite passed **207/207**, including eight
+new diagnostic tests. Coverage includes shared dispatch/doctor eligibility, exact
+scope, read-only SQL enforcement, no evidence renewal or model invocation, expired
+and invalidated observations, auth/quota/policy failures, ambiguous bindings,
+concurrent catalog changes, corrupted evidence, safe errors, unbound adapters,
+missing-state CLI behavior and rejection of mismatched/partial database scope.
+
+Package dry-run and `git diff --check` passed. Current-content secret scan checked
+164 files with zero findings; production dependency audit reported zero vulnerabilities.
+Local review completed. A bounded AGY review (`gemini-3.8-flash-high`, high effort)
+was blocked by required headless permission; independent approval is not claimed,
+and no permission bypass, retry or model substitution was attempted. This increment
+is not deployed, committed or pushed; remote platform CI remains unverified for it.
+
+## Trusted collection lifecycle — sixth increment (2026-10-28)
+
+The internal `collectResourceVerification(store, collector, request, signal?)`
+coordinator now drives exact scoped verification into the existing observation
+store. Its `ScopedVerificationCollector` is a trusted runtime-code dependency,
+not an agent-supplied callback, imported JSON claim or dynamically loaded plugin.
+No CLI/MCP observation writer, account switcher or live collector registration is
+added. This increment implements and tests the lifecycle; it does not certify a
+real provider's current account or tools.
+
+1. Validate the exact worker/binding/role/effort/version/configuration scope,
+   expected catalog revision, active resource policy, timeout and evidence TTL.
+   A trusted role-specific recipe supplies the required runtime check IDs.
+2. Durably append an `UNVERIFIED` pending observation before asynchronous work.
+   Prior success immediately becomes ineligible. A crash leaves pending state,
+   never silently restores old success, and does not automatically resume a probe.
+3. Obtain a fresh provider-owned context observation. Its auth-context ID, opaque
+   handle, version and configuration must match the requested resource. Unknown
+   authentication or expired/mismatched context prevents the functional probe.
+4. Revalidate the catalog revision and pending observation, then invoke the exact
+   model/scope with an attempt ID and context digest. Accept only normalized,
+   strictly validated results with every required observed check passing. Missing,
+   duplicate, failed or extra checks cannot produce verification. Model assertions
+   such as "tests passed" are not independent runtime checks.
+5. Reobserve context after the probe. A context identity/generation change, logout,
+   expiry, cancellation or deadline exhaustion prevents successful verification.
+6. Append the final observation only if its original catalog revision and pending
+   digest are still current. A newer failure/attempt wins over late success.
+   Successful lifetime is bounded by the initial TTL and both context expirations.
+
+`recordResourceObservation` now accepts an optional `expectedLatestDigest`.
+The observation compare-and-write occurs inside its existing SQLite transaction;
+legacy callers retain their existing behavior. No state migration is needed.
+Same-millisecond or backward-clock writes fail closed rather than inventing future
+timestamps. Completion waits for a later clock tick when necessary.
+
+Probe failures persist normalized availability/authentication separately from
+verification. Invalid results and exceptions never persist raw diagnostics. The
+coordinator preserves the trusted collector's evidence hash reference; the collector
+must retain the underlying permitted evidence. Context identity digests must derive
+from non-secret provider identity/generation information, never credential contents.
+Only digests and normalized observation metadata enter shared state.
+
+Timeout/cancellation requests abort and prevents late callbacks from writing
+success. Actual child termination and reconciliation remain obligations of the
+provider collector; racing a promise is not OS process containment. Timeout, result
+validation, cancellation and process-exit tests use deterministic fixtures.
+
+### Live activation gate
+
+Real provider collectors remain unregistered. Registration requires independently
+observed provider-context binding, role-specific runtime evidence, bounded child
+cleanup, and matching context revalidation at dispatch. An operator label, CLI
+installation or successful no-op response cannot meet this gate. Existing generic
+`verify` continues to refuse resource-bound adapters. The coordinator does not
+promote declared model competence or arbitrary tools, authorize billing, or grant
+repository/integration permissions. The seventh increment below adds automatic
+recording of ordinary task invocation failures without opening the live collection gate.
+
+A registered collector must pin the provider-owned execution context and report
+the actual invocation's context digest, not echo the request's digest. Matching
+before/after status alone cannot detect an account switch followed by a switch
+back. Providers without a certifiable binding mechanism remain unsupported for
+live scoped collection; this coordinator does not manufacture that mechanism.
+
+### Verification — 2026-10-29
+
+Windows build and full Node suite passed **222/222**, including 15 new collector
+tests. The tests exercise pending-state recovery after actual process exit, stale
+completion versus a newer failure, catalog changes before probing, exact context
+and check matching, quota/auth failures, secret/invalid result rejection, conditional
+writes, cancellation and late results. The timeout regression uses a controlled
+clock and confirms that the probe started before injecting the deadline; its first
+wall-clock version incorrectly assumed setup would always finish within 200 ms.
+
+Package dry-run includes the new collector module and source map (87 files).
+Current-content secret scan checked 166 files with zero findings; production
+dependency audit reported zero vulnerabilities. Local review completed. A bounded,
+inline-only AGY design review (`gemini-3.8-flash-high`, high effort) timed out;
+no independent approval, retry or substitution is claimed.
+
+No live resource verification, account/permission changes, deployment, commit or
+push was performed. Remote three-platform CI remains unverified for this increment.
+
+## Invocation failure feedback — seventh increment (2026-10-29)
+
+Opt-in resource-bound adapters now persist normalized invocation failures to the
+environment domain. A failed task call must not leave its selected `VERIFIED`
+observation eligible for another dispatch. This is negative feedback, not a new
+authentication/capability collector. The [provider-context audit](provider-context-audit-2026-10-29.md)
+did not establish a certified invocation binding for the installed interfaces;
+real scoped collectors remain unregistered.
+
+- Feedback uses the selected worker/binding/role/effort/version/configuration
+  scope. It does not infer account-wide quota, logout other workers, or invalidate
+  unrelated roles, efforts or bindings.
+- An `INVOCATION` receipt records normalized availability and `UNAVAILABLE`
+  verification. Authentication changes only on `AUTH_REQUIRED`; quota/service
+  failure does not imply logout. Receipt hashes identify normalized metadata,
+  not independent test or review evidence. Raw provider output is excluded.
+- Successful task calls neither mint nor renew verification. Preflight rejection
+  does not revoke evidence because no invocation occurred. `INVOCATION` receipts
+  cannot carry `VERIFIED` status.
+- Catalog applicability is rechecked after any clock wait. The write compares
+  both the catalog revision and selected observation digest transactionally.
+  Newer observations and relevant configuration changes/rollback supersede an old
+  completion. Unrelated catalog additions do not invalidate an unchanged scope.
+- Negative observations have a 60-second diagnostic lifetime. Expiration leaves
+  the scope ineligible; it never restores a historical success. Fresh trusted
+  verification is required to regain eligibility.
+- Resource-bound dispatch requires a writable observation store. This checks the
+  store's open mode; it cannot guarantee that a later disk write will succeed.
+  A write/corruption failure returns `resourceFeedback: FAILED`, blocks the adapter
+  instance and stops the task. Reviewer storage failure is not handled as ordinary
+  degraded review. Repair and revalidation are required before reopening.
+- Results distinguish `RECORDED`, `SUPERSEDED` and `FAILED`; task/review reasons
+  preserve this status. Persisted reviewer quota failure still permits the existing
+  compensating-test path, with no independent approval claim.
+
+No process-global durable fence is claimed when storage itself cannot accept a
+write. A fresh process cannot recover an in-memory failure latch; operators must
+repair storage and revalidate before reopening. Abrupt death between provider
+completion and feedback persistence also remains a recovery limitation. This
+increment does not certify arbitrary mid-invocation crash recovery.
+
+Existing records retain their schema and behavior. `INVOCATION` extends the
+closed evidence-method vocabulary; older binaries fail closed when reading these
+new records. Binary downgrade against state containing new receipts is unsupported;
+preserve compatible runtime/state backups for any later deployment.
+
+### Verification — seventh increment
+
+On 2026-10-29 the Windows build and full suite passed **235/235** tests, including
+13 new regressions covering durable quota/auth failures, timeout/cancellation,
+malformed results, scope isolation, concurrent evidence/catalog changes, rollback,
+read-only stores, corruption and write failures. Runtime tests distinguish a
+blocked lead, degraded reviewer with compensating tests, and blocked reviewer
+feedback storage. Existing legacy adapter and workspace tests also passed.
+
+The secret scan checked 168 tracked/untracked files with zero findings. Production
+dependency audit reported zero vulnerabilities. Package dry-run includes the
+feedback and collection modules (89 files); whitespace checks passed. Local review
+completed; no independent peer approval is claimed. This is deterministic local
+evidence, not live provider certification or remote three-platform CI. No live
+configuration change, deployment, commit or push occurred.

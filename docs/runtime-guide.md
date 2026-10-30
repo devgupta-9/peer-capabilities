@@ -66,6 +66,54 @@ Native SQLite uses the APIs documented for
 Provider filesystem/tool/recursion enforcement remains a live certification gate;
 neither prompts nor change-detection tripwires are a sandbox.
 
+## Scoped resource doctor
+
+For an existing repository environment with opt-in resource bindings:
+
+```powershell
+node bin/peer-capabilities.mjs resources doctor --repo REPOSITORY --config runtime.json
+```
+
+Use `--state-dir DIRECTORY` when that environment was created in a separate
+location. The command opens existing state read-only. Missing state produces
+`ENVIRONMENT_NOT_INITIALIZED`; it does not create a database or enroll accounts.
+It runs CLI version/catalog/status discovery, never a model consultation, login,
+repair, task or evidence write. `--apply` is rejected.
+
+The JSON report distinguishes `ELIGIBLE`, `BLOCKED` and `NOT_RESOURCE_BOUND`.
+Per-binding diagnostics include the exact worker/model/role/effort/version/configuration
+scope where discovery permits it, a reason and next action. Current observations
+include separate authentication, availability, verification and expiration fields.
+Missing, expired or invalidated evidence is never reported as current. Auth handles,
+account metadata, raw provider errors and evidence contents are omitted.
+
+Exit code is zero when at least one configured bound adapter has an eligible
+candidate and no configured bound adapter is blocked; otherwise it is one. A
+candidate is only eligible for resource routing: task competence/context, repository
+policy, dispatch revalidation and human gates still apply. This snapshot does not
+certify provider account identity, tools or model competence. Legacy unbound adapters
+receive no scoped readiness claim.
+
+An internal trusted collection coordinator now supports pending state, exact
+context/check validation, cancellation and conditional completion. Its lifecycle
+is tested with deterministic collectors; real provider collectors remain
+unregistered pending context and process-cleanup certification. Until those exist,
+missing scoped evidence is an explicit blocker; generic `verify` cannot authorize a bound adapter.
+See [resource contracts](architecture/identity-resource-contracts.md).
+
+For resource-bound task execution, quota/authentication/service and other invocation
+failures now revoke the exact selected proof in environment state. Successful calls
+do not extend its lifetime. Newer proof is preserved; other roles/bindings are not
+implicitly changed. Task/review reasons report whether feedback was `RECORDED`,
+`SUPERSEDED` or `FAILED`. A persisted reviewer outage may use compensating tests;
+failure to persist feedback blocks the task and adapter instance. Repair storage
+and obtain fresh trusted verification before reopening it. A new process does not
+inherit an in-memory failure latch when the database could not accept a write.
+
+The [provider-context audit](architecture/provider-context-audit-2026-10-29.md)
+keeps live scoped collection gated. This feedback path does not authorize accounts,
+switch providers, certify tools or change legacy unbound adapter behavior.
+
 ## Governed tasks
 Use a clean fixture repository first. Configure a real verification command and
 exact model profiles; keep test commands within the authorized task scope.
