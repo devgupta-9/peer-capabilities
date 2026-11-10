@@ -1,5 +1,35 @@
 # Implementation ledger
 
+2026-11-10 adds task-scoped evidence query/read surfaces for CLI and MCP, lexical
+selection for runtime hydration, and repository-wide retention planning. Required
+decision/test/link evidence is protected. Historical bodies remain retrievable,
+query cursors bind task revisions, and complete records obey explicit byte budgets.
+HOT/WARM/COLD recommendations preserve all records in physical HOT storage.
+Physical archival and deletion require later recovery qualification. See the
+[current baseline](unified-context-baseline.md#selective-retrieval-and-retention-planning--2026-11-10).
+Windows build and **254/254** tests passed, including eight new retrieval/retention
+regressions and expanded MCP checks. The publication scan checked 174 files with
+zero findings, production dependencies had zero reported vulnerabilities, and the
+package dry-run contained 93 files including both new context modules. These
+changes are local. Exact-change remote CI and deployment remain pending. Jev's
+advisory review was inconclusive, Graphify had no project index, and AGY's review
+was rejected by a model/effort mismatch. Local verification establishes this slice.
+
+2026-11-08: the first [Unified Context lifecycle slice](unified-context-baseline.md)
+adds evidence-backed task decisions, transactional supersession and explicit stale
+source handling. Runtime lead/reviewer hydration carries protected linked evidence
+and distinguishes obsolete historical statements from current meaning. Single-agent
+tasks invalidate stale decisions after edits too. Full-record evidence integrity
+and decision-linked replay fail closed on corruption. Trusted library authoring
+only; live provider gates and human approval boundaries remain in force.
+Windows build and **246/246** tests passed, including 11 decision/context regressions.
+The current-content secret scan checked 172 files without findings; production
+dependency audit reported zero vulnerabilities. Package dry-run includes the new
+decision module/source map (91 files), and whitespace checks passed. A bounded AGY
+review timed out; local review completed without an independent-approval claim.
+Changes remain local and uncommitted; this increment was not deployed or run in
+remote three-platform CI.
+
 2026-10-30: the scoped doctor, trusted collection coordinator and invocation-failure
 feedback increments were deployed locally under explicit user authorization.
 See the [deployment and recovery record](local-deployment-2026-10-30.md).

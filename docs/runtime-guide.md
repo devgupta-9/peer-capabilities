@@ -156,19 +156,64 @@ untracked files remain part of the proposed patch and require review. Verificati
 commands use a native executable and argv; Windows npm.cmd is not launched implicitly
 through a shell. Configure the intended native runner explicitly.
 
+## Evidence-backed task decisions
+
+The trusted runtime library can accept a task decision linked to existing evidence
+and an exact repository snapshot. It supports explicit replacements and stale-source
+events in the same append-oriented task database. There is no new agent-callable
+decision approval or automatic acceptance of model output.
+
+Lead and reviewer packages include current/stale decisions with their mandatory
+evidence. Source changes mark snapshot-bound decisions stale, including in tasks
+with only one agent; restoring old files does not reactivate them. Stale claims are
+labelled for reconsideration. Superseded statements stay in durable history and
+appear as history references in agent packages. Missing/corrupt evidence blocks
+replay/mutations. Required evidence exceeding the allocation blocks the task before
+dispatch and preserves artifacts for a smaller consultation. Status reports expose
+`engineeringDecisions` separately from human approvals. See the
+[lifecycle contract](architecture/unified-context-baseline.md).
+
 ## Host integration
 `node bin/peer-capabilities.mjs mcp --repo REPOSITORY --config runtime.json`
 starts a separate development MCP surface bound to that repository and local
 policy. No registration is changed automatically.
-Tools: v1_task_create, v1_task_status, v1_task_context, v1_task_dispatch,
-v1_task_resume. There is no approval, login, shell, or integration tool.
+The task tools include `v1_task_create`, `v1_task_status`, `v1_task_context`,
+`v1_task_dispatch`, `v1_task_resume`, `v1_task_evidence_query` and
+`v1_task_evidence_read`. The server also exposes `select_task_tools`.
 The existing peer-agents MCP and its exact legacy schemas remain separate.
+
+## Evidence retrieval and retention planning
+
+Inspect existing repository task state through the development CLI.
+
+```powershell
+node bin/peer-capabilities.mjs evidence query --repo REPOSITORY --id TASK_UUID --input query.json
+node bin/peer-capabilities.mjs evidence read --repo REPOSITORY --id TASK_UUID --input read.json
+node bin/peer-capabilities.mjs retention --repo REPOSITORY
+```
+
+The optional query JSON accepts `query`, `limit` (1–100, default 20), `maxBytes`
+(1 KiB–16 MiB, default 64 KiB), and a returned `cursor`. Results contain metadata
+and evidence IDs. Read JSON requires `evidenceId` and accepts the same byte-budget
+range. It returns the complete validated record or an explicit insufficient-budget
+error. MCP takes the same fields plus the task `id`. Cursors expire when the task
+revision or query parameters change. Evidence reads require a task-history link.
+
+Runtime hydration selects current-source optional evidence deterministically and
+preserves mandatory decisions, tests and explicit required links. Omitted IDs remain
+visible. Trusted library authors can append `EVIDENCE_LINKED` events with an evidence
+ID and optional `mandatory` flag. The public host surfaces expose retrieval.
+
+The retention command produces a read-only HOT/WARM/COLD plan across repository
+tasks. Historical references remain protected. Physical storage stays HOT, with
+archival/deletion and recovery qualification deferred. These inspection commands
+use existing task state and accept no `--apply`.
 
 ## Limits
 Baseline allocation is conservative and byte-estimated. Mandatory material that
 cannot fit fails explicitly. Delta logic is unit-tested, but real adapters currently
 use fresh sessions/full packages; verified live delta/session reuse is not complete.
-Graphify/Headroom/Jev connectors, accepted-decision promotion, retention/compaction,
+Graphify/Headroom/Jev connectors, cross-task decision promotion, physical archival/compaction,
 specialist/re-review flows, trusted host approvals and live platform certification
 remain planned. Their switches are reserved configuration, not evidence of active
 connectors. All fixture scenarios run without requiring any optional integration.

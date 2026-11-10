@@ -1,5 +1,6 @@
 import * as z from 'zod/v4';
 import type { ResourceContext, ResourceAssignment } from './resource-routing.js';
+import type { Decision } from './decisions.js';
 
 export const availability = z.enum(['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW', 'RATE_LIMITED',
   'QUOTA_EXHAUSTED', 'AUTH_REQUIRED', 'MODEL_UNAVAILABLE', 'SERVICE_UNAVAILABLE', 'TIMEOUT',
@@ -45,6 +46,7 @@ export type TaskState = {
   status: 'CREATED' | 'RUNNING' | 'CHECKPOINTED' | 'READY' | 'INTEGRATING' | 'COMPLETE' | 'BLOCKED';
   assignment?: Choice; worktree?: string; baseSha?: string; leadFinished: boolean;
   tests: TestRecord[]; reviews: Review[]; notes: string[]; degraded: boolean;
+  decisions?: Decision[];
   checkpoint?: Record<string, unknown>;
   patch?: { path: string; hash: string; bytes: number };
   integration?: { operationDigest: string; actor: string; integrated: boolean;

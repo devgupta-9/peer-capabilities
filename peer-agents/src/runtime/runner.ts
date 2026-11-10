@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { runCapture } from '../process.js';
 import { redact } from '../security.js';
 import type { AgentAdapter, AgentResult, Choice, Mode, TaskState } from './contracts.js';
-import { contextPackage } from './context.js';
+import { contextPackage, type ContextEvidence } from './context.js';
 import { digest } from './identity.js';
 import { exportPatch, fingerprint, integratePatch, prepareWorktree, repositoryRoot, repositoryIdentity } from './repository.js';
 import { selectAgent } from './scheduler.js';
@@ -70,24 +70,46 @@ export class Runtime {
     }
     return next;
   }
-  private package(state: TaskState, choice: Choice, role: string, evidence: { id: string; text: string; mandatory: boolean }[] = []) {
-    const window = choice.contextWindow;
-    return contextPackage({
-      task: { ...state }, role, question: state.objective,
-      constraints: ['Do not publish, commit, access credentials or delegate to other agents.', 'Work only in the assigned repository.', 'Reviewers must not change files.',
-        'Tool selection is optional advice, not permission or proof of use. Discover tools in this session, preserve disabled settings, and continue with direct inspection/tests if unavailable.'],
-      toolSelection: selectTaskTools({ objective: state.objective,
-        ...(role === 'reviewer' ? { needs: ['PATCH_REVIEW'] } : {}),
-        evidenceAvailable: evidence.length > 0,
-        outputBytes: evidence.reduce((sum, item) => sum + Buffer.byteLength(item.text, 'utf8'), 0),
-        protectedMaterial: true,
-      }, this.policy.optionalIntegrations),
-      evidence, events: this.store.events(state.id).map(e => ({ ...e })),
-      policyVersion: this.policy.policyVersion, fingerprint: state.baseline, graphVersion: null,
-      allocation: { window, occupied: 0, host: Math.ceil(window * .05), output: Math.ceil(window * .1),
-        tools: Math.ceil(window * .15), margin: Math.ceil(window * .05),
-        ceiling: Math.floor(window * (this.policy.mode === 'FAST' ? .35 : .55)), remaining: window },
-    });
+  private package(state: TaskState, choice: Choice, role: string, sourceFingerprint: string,
+    additionalEvidence: ContextEvidence[] = []) {
+    try {
+      const window = choice.contextWindow;
+      const selection = this.store.contextEvidence(state.id, sourceFingerprint, state.objective);
+      const evidence: ContextEvidence[] = selection.evidence;
+      for (const item of additionalEvidence) {
+        const existing = evidence.find(e => e.id === item.id);
+        if (existing) existing.mandatory ||= item.mandatory;
+        else evidence.push(item);
+      }
+      const input = {
+        task: { ...state, decisions: undefined }, decisions: state.decisions, role, question: state.objective,
+        constraints: ['Do not publish, commit, access credentials or delegate to other agents.', 'Work only in the assigned repository.', 'Reviewers must not change files.',
+          'Tool selection is optional advice, not permission or proof of use. Discover tools in this session, preserve disabled settings, and continue with direct inspection/tests if unavailable.'],
+        toolSelection: selectTaskTools({ objective: state.objective,
+          ...(role === 'reviewer' ? { needs: ['PATCH_REVIEW'] } : {}),
+          evidenceAvailable: evidence.length > 0,
+          outputBytes: evidence.reduce((sum, item) => sum + Buffer.byteLength(item.text, 'utf8'), 0),
+          protectedMaterial: true,
+        }, this.policy.optionalIntegrations),
+        evidence, excludedEvidence: selection.omissions.filter(id => !evidence.some(item => item.id === id)),
+        events: this.store.events(state.id).map(event => {
+          if (event.type !== 'DECISION_ACCEPTED') return { ...event };
+          // The canonical decision projection owns current meaning. History retains
+          // locators without replaying superseded statements as current instructions.
+          const { statement: _statement, ...reference } = event.payload as Record<string, unknown>;
+          const { hash, previousHash: _previousHash, ...metadata } = event;
+          return { ...metadata, payload: reference, sourceEventHash: hash, projection: 'DECISION_REFERENCE' };
+        }),
+        policyVersion: this.policy.policyVersion, fingerprint: sourceFingerprint, graphVersion: null,
+        allocation: { window, occupied: 0, host: Math.ceil(window * .05), output: Math.ceil(window * .1),
+          tools: Math.ceil(window * .15), margin: Math.ceil(window * .05),
+          ceiling: Math.floor(window * (this.policy.mode === 'FAST' ? .35 : .55)), remaining: window },
+      };
+      return contextPackage(input);
+    } catch (error) {
+      this.append(state, 'TASK_BLOCKED', { reason: 'Context hydration failed; required evidence must be reconciled or the consultation split before another task' });
+      throw error;
+    }
   }
   async start(directory: string, objective: string, checkpointOnly = false): Promise<TaskState> {
     const state = await this.create(directory, objective);
@@ -111,8 +133,11 @@ export class Runtime {
       state = this.append(state, 'ASSIGNED', choice);
       const isolated = await prepareWorktree(repository);
       state = this.append(state, 'WORKTREE_CREATED', isolated);
-      const context = this.package(state, choice, 'lead');
-      state = this.append(state, 'CONTEXT_PACKAGED', { hash: context.hash, kind: context.kind, evidence: [], role: 'lead', toolSelection: context.toolSelection });
+      const leadFingerprint = await fingerprint(isolated.path);
+      state = this.store.invalidateDecisions(state.id, state.revision, leadFingerprint);
+      const context = this.package(state, choice, 'lead', leadFingerprint);
+      state = this.append(state, 'CONTEXT_PACKAGED', { hash: context.hash, kind: context.kind,
+        evidence: context.evidence.map(e => e.id), role: 'lead', toolSelection: context.toolSelection });
       const result = await this.adapters.find(a => a.id === choice.agent)!.execute({
         id: randomUUID(), taskId: state.id, cwd: isolated.path, role: 'lead', choice, prompt: JSON.stringify(context),
       });
@@ -123,17 +148,20 @@ export class Runtime {
       const evidence = this.store.evidence({ text: redact(result.response), classification: 'PROJECT', source: 'agent-report:' + choice.agent, version: await fingerprint(isolated.path) });
       state = this.append(state, 'LEAD_FINISHED', { evidence });
       state = await this.observedTest(state, 'lead-verification');
+      state = this.store.invalidateDecisions(state.id, state.revision, await fingerprint(isolated.path));
       let reviewer: Choice | undefined;
       const reviewEnvironment = await this.environment();
       try { reviewer = selectAgent(reviewEnvironment.choices, { role: 'reviewer', competence: this.policy.competence,
         complexity: this.policy.complexity, requiredContext: 2048, excluded: [choice.agent] }); } catch { /* single-agent is first-class */ }
       if (reviewer) {
         const reviewPatch = await exportPatch(repository, isolated.path, isolated.baseSha);
-        const reviewContext = this.package(state, reviewer, 'reviewer', [{
+        const reviewFingerprint = await fingerprint(isolated.path);
+        state = this.store.invalidateDecisions(state.id, state.revision, reviewFingerprint);
+        const reviewContext = this.package(state, reviewer, 'reviewer', reviewFingerprint, [{
           id: reviewPatch.hash, text: await readFile(reviewPatch.path, 'utf8'), mandatory: true,
         }]);
         state = this.append(state, 'CONTEXT_PACKAGED', { hash: reviewContext.hash, kind: reviewContext.kind,
-          evidence: [reviewPatch.hash], role: 'reviewer', toolSelection: reviewContext.toolSelection });
+          evidence: reviewContext.evidence.map(e => e.id), role: 'reviewer', toolSelection: reviewContext.toolSelection });
         const beforeReview = await fingerprint(isolated.path);
         const review = await this.adapters.find(a => a.id === reviewer!.agent)!.execute({
           id: randomUUID(), taskId: state.id, cwd: isolated.path, role: 'reviewer', choice: reviewer,
@@ -212,6 +240,7 @@ export class Runtime {
       id, status: state.status, tests: state.tests,
       independentReview: state.reviews.some(r => r.agent !== state.assignment?.agent && r.outcome === 'APPROVE'),
       reviews: state.reviews, degraded: state.degraded,
+      engineeringDecisions: state.decisions ?? [],
       humanDecisions: state.integration ? [state.integration] : [],
       toolSelections: this.store.events(id).filter(e => e.type === 'CONTEXT_PACKAGED').map(e => e.payload),
       toolsExecutedByRuntime: [],

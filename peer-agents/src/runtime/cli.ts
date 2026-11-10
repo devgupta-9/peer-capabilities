@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as z from 'zod/v4';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
@@ -40,6 +40,7 @@ export async function main(argv: string[]): Promise<void> {
     console.log('Tool selection: tools select --objective TEXT | --input FILE; tools mcp (host-neutral local stdio). Selection is advice, never execution or permission.');
     console.log('Projects: project add <absolute-root> | remove <absolute-root> | list | check <absolute-path>\nEnrollment is explicit additional trust, not required for a host-reported active Git workspace.');
     console.log('Resources: resources doctor --repo REPOSITORY --config FILE [--state-dir DIRECTORY]\nRead-only scoped eligibility inspection. Runs CLI discovery only; no model calls, enrollment, login or evidence renewal.');
+    console.log('Evidence: evidence query|read --repo REPOSITORY --id TASK [--input JSON_FILE]\nRetention: retention --repo REPOSITORY\nInspect existing task state. Retention produces a read-only plan.');
     console.log('Peer Capabilities (development; not release-certified)\nCommands: setup doctor update sync repair rollback uninstall version discover verify run resume status mcp\nEnvironment: --manifest FILE --root DIRECTORY [--state-dir DIRECTORY] [--apply]\nTasks: --repo REPOSITORY --config FILE [--objective TEXT] [--id UUID] [--checkpoint-only]\nsetup/update/sync/repair preview changes unless --apply. CLI/MCP integration is disabled pending trusted host approval. Inspect the verified patch for deliberate manual integration. No npm postinstall mutations.');
     return;
   }
@@ -69,6 +70,26 @@ export async function main(argv: string[]): Promise<void> {
     if (action === 'remove') { print({ removed: policy.remove(target) }); return; }
     if (action === 'check') { const decision = await policy.check(target); print(decision); if (!decision.ready) process.exitCode = 1; return; }
     throw new Error('Unknown project command; use add, remove, list or check');
+  }
+  if (command === 'evidence' || command === 'retention') {
+    if (!v.repo || v.apply) throw new Error('Evidence inspection requires --repo and accepts no --apply');
+    const action = positionals[1];
+    if (command === 'evidence' && (!v.id || !['query', 'read'].includes(action) || positionals.length !== 2)) {
+      throw new Error('Use evidence query|read --repo REPOSITORY --id TASK [--input JSON_FILE]');
+    }
+    if (command === 'retention' && positionals.length !== 1) throw new Error('Use retention --repo REPOSITORY');
+    const root = await repositoryRoot(path.resolve(v.repo));
+    const file = path.join(await stateDirectory(root), 'tasks.sqlite');
+    await access(file);
+    const store = new TaskStore(file);
+    try {
+      if (command === 'retention') print(store.retentionReport());
+      else {
+        const request = v.input ? await json(v.input) : {};
+        print(action === 'query' ? store.queryEvidence(v.id!, request) : store.readTaskEvidence(v.id!, request));
+      }
+    } finally { store.close(); }
+    return;
   }
   if (['setup', 'doctor', 'update', 'sync', 'repair', 'rollback', 'uninstall'].includes(command)) {
     if (!v.root) throw new Error('--root is required; no implicit home-directory installation');

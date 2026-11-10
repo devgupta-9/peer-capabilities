@@ -5,6 +5,7 @@ import { Runtime } from './runner.js';
 import { TaskStore } from './store.js';
 import { PACKAGE_VERSION } from '../version.js';
 import { registerTaskToolSelector } from '../tool-selection-host.js';
+import { evidenceQuerySchema, evidenceReadSchema } from './evidence.js';
 
 export function createTaskServer(runtime: Runtime, store: TaskStore, repository: string, enabled: Readonly<Record<string, boolean>> = {}): McpServer {
   const server = new McpServer({ name: 'peer-capabilities', version: PACKAGE_VERSION });
@@ -13,7 +14,15 @@ export function createTaskServer(runtime: Runtime, store: TaskStore, repository:
     content: [{ type: 'text' as const, text: redact(JSON.stringify(value)) }], ...(isError ? { isError: true } : {}),
   });
   const guard = async (action: () => unknown | Promise<unknown>) => {
-    try { return reply(await action()); } catch { return reply({ error: 'Task operation rejected; inspect local task status. No implicit retry.' }, true); }
+    try { return reply(await action()); } catch (error) {
+      if (error instanceof Error && error.message.startsWith('INSUFFICIENT_CONTEXT:')) {
+        return reply({ error: 'INSUFFICIENT_CONTEXT', nextAction: 'Increase the applicable context or retrieval budget, or split the consultation. Complete evidence is retained.' }, true);
+      }
+      if (error instanceof Error && error.message === 'Evidence cursor expired; restart the query') {
+        return reply({ error: 'EVIDENCE_CURSOR_EXPIRED', nextAction: 'Restart the query without a cursor.' }, true);
+      }
+      return reply({ error: 'Task operation rejected; inspect local task status. No implicit retry.' }, true);
+    }
   };
   const idSchema = z.object({ id: z.string().uuid() }).strict();
   server.registerTool('v1_task_create', { description: 'Create durable task state in the server-configured repository; does not run an agent.', inputSchema: z.object({ objective: z.string().min(1).max(24000) }).strict() },
@@ -22,6 +31,12 @@ export function createTaskServer(runtime: Runtime, store: TaskStore, repository:
     ({ id }) => guard(() => runtime.report(id)));
   server.registerTool('v1_task_context', { description: 'Read canonical task state and events; agent-specific packages are constructed during dispatch.', inputSchema: idSchema },
     ({ id }) => guard(() => ({ state: store.get(id), events: store.events(id) })));
+  server.registerTool('v1_task_evidence_query', { description: 'Search task-linked evidence metadata with deterministic lexical ranking and revision-bound pagination.',
+    inputSchema: evidenceQuerySchema.extend({ id: z.string().uuid() }) },
+    ({ id, ...request }) => guard(() => store.queryEvidence(id, request)));
+  server.registerTool('v1_task_evidence_read', { description: 'Retrieve one complete, hash-validated task-linked evidence record within an explicit byte budget.',
+    inputSchema: evidenceReadSchema.extend({ id: z.string().uuid() }) },
+    ({ id, ...request }) => guard(() => store.readTaskEvidence(id, request)));
   server.registerTool('v1_task_dispatch', { description: 'Dispatch a created task under the server-configured exact policy; never integrates the patch.', inputSchema: idSchema },
     ({ id }) => guard(() => runtime.dispatch(id)));
   server.registerTool('v1_task_resume', { description: 'Resume a safe durable checkpoint; never approves or integrates.', inputSchema: idSchema },
