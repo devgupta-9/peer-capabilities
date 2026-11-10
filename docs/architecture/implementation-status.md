@@ -10,8 +10,10 @@ Physical archival and deletion require later recovery qualification. See the
 Windows build and **254/254** tests passed, including eight new retrieval/retention
 regressions and expanded MCP checks. The publication scan checked 174 files with
 zero findings, production dependencies had zero reported vulnerabilities, and the
-package dry-run contained 93 files including both new context modules. These
-changes are local. Exact-change remote CI and deployment remain pending. Jev's
+package dry-run contained 93 files including both new context modules. The
+implementation was committed and pushed as `d383513`, passed all four remote CI
+jobs, and was deployed to the three existing Codex/Antigravity bridge registrations.
+See the [deployment and recovery record](local-deployment-2026-11-10.md). Jev's
 advisory review was inconclusive, Graphify had no project index, and AGY's review
 was rejected by a model/effort mismatch. Local verification establishes this slice.
 

@@ -175,4 +175,6 @@ retention, corruption, package allocation and CLI dispatch. Expanded MCP checks
 exercise query/read and explicit oversized-response errors. Publication scanning
 checked 174 files with zero findings, the production audit reported zero
 vulnerabilities, and the package dry-run included 93 files with both new modules.
-Exact-change remote CI, live session qualification and deployment remain pending.
+The implementation commit `d383513` subsequently passed remote Windows, macOS and
+Linux CI and was deployed locally under explicit user authorization. Live session
+qualification remains pending. [Deployment record](local-deployment-2026-11-10.md)
