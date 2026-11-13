@@ -173,7 +173,24 @@ dispatch and preserves artifacts for a smaller consultation. Status reports expo
 `engineeringDecisions` separately from human approvals. See the
 [lifecycle contract](architecture/unified-context-baseline.md).
 
+## Explicit decision source files
+
+Trusted runtime integrations can call
+`Runtime.acceptDecision(taskId, expectedRevision, input)` with `sourceFiles`, a list
+of 1–128 repository-relative regular files. The runtime captures their content,
+mode and index fingerprints from the authorized task checkout. Supporting evidence
+must match the repository snapshot being accepted. Omit `sourceFiles` to retain
+whole-repository invalidation.
+
+Changes outside a declared scope can preserve an active decision after a recorded
+source check. Changed/deleted dependencies mark it stale. The decision keeps its
+accepted `sourceFingerprint` and evidence provenance, with `validatedFingerprint`
+recording the most recent successful file-scope check. Existing CLI/MCP status
+and context reads include these fields. Scope completeness is the trusted author's
+responsibility. [Source dependency contract](architecture/unified-context-baseline.md#explicit-source-dependencies--2026-11-13)
+
 ## Host integration
+
 `node bin/peer-capabilities.mjs mcp --repo REPOSITORY --config runtime.json`
 starts a separate development MCP surface bound to that repository and local
 policy. No registration is changed automatically.

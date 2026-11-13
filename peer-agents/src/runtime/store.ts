@@ -8,7 +8,8 @@ import type { Choice, TaskState } from './contracts.js';
 import { approvalGrantSchema } from './approval.js';
 import { taskToolPlanSchema } from '../tool-selection.js';
 import { resourceAssignmentSchema } from './resource-routing.js';
-import { acceptedDecisionSchema, decisionInvalidationSchema, acceptDecision, invalidateDecisions } from './decisions.js';
+import { acceptedDecisionSchema, decisionInvalidationSchema, decisionSourceCheckSchema, acceptDecision, invalidateDecisions, checkDecisionSources } from './decisions.js';
+import type { RepositorySnapshot } from './repository.js';
 import { evidenceReferences, evidenceRelevance, evidenceQuerySchema, evidenceReadSchema } from './evidence.js';
 
 const text = z.string().min(1);
@@ -30,6 +31,7 @@ const schemas = {
   EVIDENCE_LINKED: z.object({ evidence: z.string().regex(/^[a-f0-9]{64}$/), mandatory: z.boolean().optional() }).strict(),
   DECISION_ACCEPTED: acceptedDecisionSchema,
   DECISIONS_INVALIDATED: decisionInvalidationSchema,
+  DECISION_SOURCES_CHECKED: decisionSourceCheckSchema,
   WORKTREE_CREATED: z.object({ path: text, baseSha: text }).strict(),
   CONTEXT_PACKAGED: z.object({ hash: text, kind: z.enum(['FULL', 'DELTA']), evidence: z.array(text), role: text.optional(), toolSelection: taskToolPlanSchema.optional() }).strict(),
   LEAD_FINISHED: z.object({ evidence: text }).strict(),
@@ -64,6 +66,7 @@ function reduce(state: TaskState | undefined, event: Event): TaskState {
     case 'EVIDENCE_LINKED': break; // The immutable event is the task's evidence association.
     case 'DECISION_ACCEPTED': next.decisions = acceptDecision(next.decisions ?? [], schemas.DECISION_ACCEPTED.parse(payload), event.at, event.sequence); break;
     case 'DECISIONS_INVALIDATED': next.decisions = invalidateDecisions(next.decisions ?? [], schemas.DECISIONS_INVALIDATED.parse(payload)); break;
+    case 'DECISION_SOURCES_CHECKED': next.decisions = checkDecisionSources(next.decisions ?? [], schemas.DECISION_SOURCES_CHECKED.parse(payload)); break;
     case 'WORKTREE_CREATED': {
       const p = schemas.WORKTREE_CREATED.parse(payload); next.worktree = p.path; next.baseSha = p.baseSha; break;
     }
@@ -181,9 +184,26 @@ export class TaskStore {
     decisionInvalidationSchema.shape.fingerprint.parse(fingerprint);
     const state = this.get(id);
     if (state.revision !== expected) throw new Error('Task revision conflict');
-    const ids = (state.decisions ?? []).filter(d => d.status === 'ACTIVE' && d.sourceFingerprint !== fingerprint).map(d => d.id);
+    const ids = (state.decisions ?? []).filter(d => d.status === 'ACTIVE' && (d.validatedFingerprint ?? d.sourceFingerprint) !== fingerprint).map(d => d.id);
     if (!ids.length) return state;
     return this.append(id, expected, 'DECISIONS_INVALIDATED', { ids, fingerprint });
+  }
+  /** Trusted runtime observations only. This method never authorizes an operation. */
+  checkDecisionSources(id: string, expected: number, snapshot: RepositorySnapshot): TaskState {
+    decisionSourceCheckSchema.shape.fingerprint.parse(snapshot.fingerprint);
+    const state = this.get(id);
+    if (state.revision !== expected) throw new Error('Task revision conflict');
+    const changed = (state.decisions ?? []).filter(d => d.status === 'ACTIVE' &&
+      (d.validatedFingerprint ?? d.sourceFingerprint) !== snapshot.fingerprint);
+    if (!changed.length) return state;
+    if (!changed.some(d => d.sourceScope)) return this.invalidateDecisions(id, expected, snapshot.fingerprint);
+    const checks = changed.map(decision => ({ id: decision.id,
+      ...(decision.sourceScope ? { files: decision.sourceScope.files.map(file => {
+        const actual = snapshot.files.get(file.path);
+        return { path: file.path, fingerprint: actual?.regular ? actual.fingerprint : null };
+      }) } : {}),
+    }));
+    return this.append(id, expected, 'DECISION_SOURCES_CHECKED', { fingerprint: snapshot.fingerprint, checks });
   }
   evidence(input: { text: string; classification: string; source: string; version: string }): string {
     if (!['PUBLIC', 'PROJECT'].includes(input.classification)) throw new Error('SECRET or SENSITIVE evidence requires an unavailable protected storage policy');

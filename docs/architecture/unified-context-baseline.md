@@ -79,9 +79,9 @@ authorize integration, deployment, credentials or billing. Supporting evidence i
 provenance, not an automatic claim that the decision is correct or independently
 reviewed. Existing signed human gates and integration boundaries remain in force.
 
-The initial dependency boundary is a complete repository snapshot, including dirty
+The default dependency boundary is a complete repository snapshot, including dirty
 state. Any snapshot change conservatively marks affected snapshot-bound decisions
-stale; finer file/claim dependency tracking is later work. Explicit replacement
+stale. The file-scoped increment below supports explicit narrower dependencies. Explicit replacement
 needs a new decision ID and evidence for the new snapshot. Restoring old source
 does not silently reactivate stale or superseded decisions.
 
@@ -178,3 +178,71 @@ vulnerabilities, and the package dry-run included 93 files with both new modules
 The implementation commit `d383513` subsequently passed remote Windows, macOS and
 Linux CI and was deployed locally under explicit user authorization. Live session
 qualification remains pending. [Deployment record](local-deployment-2026-11-10.md)
+
+## Explicit source dependencies — 2026-11-13
+
+The next local increment adds optional file scopes for engineering decisions.
+The trusted library method `Runtime.acceptDecision(taskId, expectedRevision, input)`
+accepts the existing decision ID, statement, evidence and supersession fields, plus
+an optional `sourceFiles` list. It captures the repository and file fingerprints
+itself under the existing repository/task lease, rechecks the repository snapshot,
+then appends the decision with an optimistic revision check.
+
+An omitted file list preserves whole-repository invalidation. An explicit list must
+contain 1–128 unique regular files present in the Git snapshot. The existing native
+path identity and containment logic protects traversal. Capture rejects absolute
+or escaping paths, absent files, untracked ignored files, duplicate normalized paths and symlinks.
+Source snapshots reject physical parent paths that escape the repository.
+
+Each declared dependency records its working-file content, filesystem mode and
+Git index versions through a digest. The same traversal computes the original
+whole-repository fingerprint, retaining its byte-compatible identity. File checks
+detect edits, removal, renaming, staging-only changes and file-type changes.
+
+When a repository fingerprint changes, the runtime compares every affected active
+decision with its declared scope. `DECISION_SOURCES_CHECKED` records the observations
+and updates the canonical projection atomically. Matching file dependencies retain
+ACTIVE status and receive a `validatedFingerprint` for the observed repository.
+Changed or missing dependencies become STALE. Repository-wide decisions retain
+their conservative invalidation behavior. Incomplete, duplicate and scope-narrowing
+observation events are rejected. Replay reproduces the same outcome.
+An unavailable or unsafe source snapshot rejects revalidation and preserves the
+existing records for reconciliation.
+
+The accepted `sourceFingerprint` and supporting evidence versions retain their
+original provenance. Hydration requires an active decision's latest validated
+fingerprint to match the package source, and still validates its evidence against
+the accepted snapshot. Stale decisions require explicit replacement even after
+source rollback. Single-agent and reviewer paths perform the same checks.
+
+File scopes are explicit engineering claims about dependency completeness. Authors
+must include relevant configuration and contract files. Directory membership,
+unlisted imports, Git history and semantic relationships require a repository-wide
+scope or a later dependency model. Automatic scope inference, symbol-level claims,
+physical archival and verified provider-session deltas remain future work.
+
+This increment adds a trusted library authoring surface. The runtime's CLI/MCP
+surfaces expose the resulting state through their existing read operations. Source
+observation uses current snapshots and runtime leases, with the existing limitation
+that arbitrary external filesystem writers can race the runtime. The new event type
+requires a compatible reader when opening task state after an upgrade.
+
+Jev recommended explicit file scopes for this increment. Source inspection and
+deterministic tests establish behavior. The project still has no Graphify index.
+
+### Verification
+
+Windows / Node 24.18.0 build and the complete suite passed **266/266** tests,
+including 12 new regression cases. Coverage includes legacy fingerprint identity,
+unrelated edits, mixed scoped/repository-wide invalidation, unchanged evidence
+provenance, durable replay, deletion, renaming, staged-only changes, symlinks,
+junction escape rejection, atomic event validation, conservative fallback,
+reviewer hydration, restart/resume and single-agent edits. The suite also exercises
+filesystem mode changes on POSIX platforms during a future cross-platform run.
+
+The current-content secret scan checked 176 files with zero findings. The
+production dependency audit reported zero vulnerabilities. The package dry-run
+contained 93 files, including the updated runtime modules, and whitespace checks
+passed. This record captures local verification. GitHub Actions records
+cross-platform checks for each pushed commit. Deployment and live provider
+qualification remain pending.

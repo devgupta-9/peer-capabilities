@@ -24,7 +24,7 @@ export function contextPackage(input: {
   const cp = input.checkpoint;
   const decisions = input.decisions ? projectDecisions(input.decisions) : undefined;
   for (const decision of decisions?.current ?? []) {
-    if (decision.status === 'ACTIVE' && decision.sourceFingerprint !== input.fingerprint) throw new Error('STALE_DECISION_CONTEXT');
+    if (decision.status === 'ACTIVE' && (decision.validatedFingerprint ?? decision.sourceFingerprint) !== input.fingerprint) throw new Error('STALE_DECISION_CONTEXT');
     for (const id of decision.evidence) {
       const matches = input.evidence.filter(e => e.id === id), item = matches[0];
       if (matches.length !== 1 || !item.mandatory || !item.source || item.version !== decision.sourceFingerprint ||

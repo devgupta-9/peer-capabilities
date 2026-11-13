@@ -25,13 +25,20 @@ export async function repositoryIdentity(directory: string) {
 export async function stateDirectory(root: string): Promise<string> {
   return path.join((await repositoryIdentity(root)).common.canonicalPath, 'peer-capabilities');
 }
-export async function fingerprint(root: string): Promise<string> {
+export type RepositorySnapshot = {
+  root: string; fingerprint: string;
+  files: ReadonlyMap<string, { fingerprint: string; regular: boolean }>;
+};
+
+/** Share the canonical Git traversal with scoped decision checks. */
+export async function repositorySnapshot(root: string): Promise<RepositorySnapshot> {
   const identity = directoryIdentity(root);
   root = identity.canonicalPath;
   const head = (await git(root, ['rev-parse', 'HEAD'])).trim();
   const index = await git(root, ['ls-files', '--stage', '-z']);
   const files = (await git(root, ['ls-files', '-z', '--cached', '--others', '--exclude-standard'])).split('\0').filter(Boolean);
   const entries: [string, string, number][] = [];
+  const regularFiles = new Set<string>();
   for (const relative of [...new Set(files)].sort()) {
     const full = childPath(root, relative);
     try {
@@ -42,13 +49,41 @@ export async function fingerprint(root: string): Promise<string> {
         const hash = createHash('sha256');
         for await (const chunk of createReadStream(full)) hash.update(chunk);
         entries.push([relative, hash.digest('hex'), info.mode]);
+        regularFiles.add(relative);
       }
       else throw new Error('Unsupported submodule or special file in fingerprint');
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') entries.push([relative, 'DELETED', 0]); else throw e;
     }
   }
-  return digest({ head, index, entries });
+  const staged = new Map<string, string[]>();
+  for (const row of index.split('\0').filter(Boolean)) {
+    const separator = row.indexOf('\t');
+    if (separator < 0) throw new Error('Invalid Git index record');
+    const relative = row.slice(separator + 1);
+    const versions = staged.get(relative) ?? [];
+    versions.push(row.slice(0, separator));
+    staged.set(relative, versions);
+  }
+  return { root, fingerprint: digest({ head, index, entries }),
+    files: new Map(entries.map(entry => [entry[0], {
+      fingerprint: digest({ entry, index: staged.get(entry[0]) ?? [] }), regular: regularFiles.has(entry[0]),
+    }])) };
+}
+export async function fingerprint(root: string): Promise<string> {
+  return (await repositorySnapshot(root)).fingerprint;
+}
+export function captureFileDependencies(snapshot: RepositorySnapshot, paths: string[]) {
+  if (!paths.length || paths.length > 128) throw new Error('Declare between 1 and 128 source files');
+  const files = paths.map(relative => {
+    const normalized = path.relative(snapshot.root, childPath(snapshot.root, relative)).split(path.sep).join('/');
+    const file = snapshot.files.get(normalized);
+    if (!file?.regular) throw new Error('Source dependency must be a regular file in the Git snapshot');
+    return { path: normalized, fingerprint: file.fingerprint };
+  });
+  if (new Set(files.map(file => file.path)).size !== files.length) throw new Error('Duplicate source dependency');
+  files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  return { kind: 'FILES' as const, files };
 }
 export async function prepareWorktree(root: string): Promise<{ path: string; baseSha: string }> {
   if ((await git(root, ['status', '--porcelain=v1', '--untracked-files=all'])).trim()) {

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { runCapture } from '../process.js';
-import { redact } from '../security.js';
+import { redact, assertNonSecret } from '../security.js';
 import type { AgentAdapter, AgentResult, Choice, Mode, TaskState } from './contracts.js';
 import { contextPackage, type ContextEvidence } from './context.js';
 import { digest } from './identity.js';
-import { exportPatch, fingerprint, integratePatch, prepareWorktree, repositoryRoot, repositoryIdentity } from './repository.js';
+import { exportPatch, fingerprint, repositorySnapshot, captureFileDependencies, integratePatch, prepareWorktree, repositoryRoot, repositoryIdentity } from './repository.js';
+import { decisionRequestSchema } from './decisions.js';
 import { selectAgent } from './scheduler.js';
 import { TaskStore } from './store.js';
 import { ApprovalVerifier } from './approval.js';
@@ -121,6 +122,22 @@ export class Runtime {
     return this.store.create({ objective, repository, baseline: await fingerprint(repository),
       manifestDigest: this.policy.manifestDigest, environmentDigest: environment.digest });
   }
+  /** Trusted authoring captures the scope from source before accepting an engineering decision. */
+  async acceptDecision(id: string, expected: number, input: unknown): Promise<TaskState> {
+    const { sourceFiles, ...request } = decisionRequestSchema.parse(input);
+    assertNonSecret(input);
+    const state = this.store.get(id);
+    if (state.revision !== expected) throw new Error('Task revision conflict');
+    return this.leased(state, async () => {
+      const directory = state.worktree ?? state.repository;
+      const snapshot = await repositorySnapshot(directory);
+      const sourceScope = sourceFiles ? captureFileDependencies(snapshot, sourceFiles) : undefined;
+      if (await fingerprint(directory) !== snapshot.fingerprint) throw new Error('Source changed during decision capture');
+      return this.store.acceptDecision(id, expected, { ...request, sourceFingerprint: snapshot.fingerprint,
+        ...(sourceScope ? { sourceScope } : {}),
+      });
+    });
+  }
   async dispatch(id: string, checkpointOnly = false): Promise<TaskState> {
     let state = this.store.get(id);
     if (state.status !== 'CREATED') throw new Error('Task already dispatched; use resume');
@@ -133,8 +150,9 @@ export class Runtime {
       state = this.append(state, 'ASSIGNED', choice);
       const isolated = await prepareWorktree(repository);
       state = this.append(state, 'WORKTREE_CREATED', isolated);
-      const leadFingerprint = await fingerprint(isolated.path);
-      state = this.store.invalidateDecisions(state.id, state.revision, leadFingerprint);
+      const leadSnapshot = await repositorySnapshot(isolated.path);
+      const leadFingerprint = leadSnapshot.fingerprint;
+      state = this.store.checkDecisionSources(state.id, state.revision, leadSnapshot);
       const context = this.package(state, choice, 'lead', leadFingerprint);
       state = this.append(state, 'CONTEXT_PACKAGED', { hash: context.hash, kind: context.kind,
         evidence: context.evidence.map(e => e.id), role: 'lead', toolSelection: context.toolSelection });
@@ -148,15 +166,16 @@ export class Runtime {
       const evidence = this.store.evidence({ text: redact(result.response), classification: 'PROJECT', source: 'agent-report:' + choice.agent, version: await fingerprint(isolated.path) });
       state = this.append(state, 'LEAD_FINISHED', { evidence });
       state = await this.observedTest(state, 'lead-verification');
-      state = this.store.invalidateDecisions(state.id, state.revision, await fingerprint(isolated.path));
+      state = this.store.checkDecisionSources(state.id, state.revision, await repositorySnapshot(isolated.path));
       let reviewer: Choice | undefined;
       const reviewEnvironment = await this.environment();
       try { reviewer = selectAgent(reviewEnvironment.choices, { role: 'reviewer', competence: this.policy.competence,
         complexity: this.policy.complexity, requiredContext: 2048, excluded: [choice.agent] }); } catch { /* single-agent is first-class */ }
       if (reviewer) {
         const reviewPatch = await exportPatch(repository, isolated.path, isolated.baseSha);
-        const reviewFingerprint = await fingerprint(isolated.path);
-        state = this.store.invalidateDecisions(state.id, state.revision, reviewFingerprint);
+        const reviewSnapshot = await repositorySnapshot(isolated.path);
+        const reviewFingerprint = reviewSnapshot.fingerprint;
+        state = this.store.checkDecisionSources(state.id, state.revision, reviewSnapshot);
         const reviewContext = this.package(state, reviewer, 'reviewer', reviewFingerprint, [{
           id: reviewPatch.hash, text: await readFile(reviewPatch.path, 'utf8'), mandatory: true,
         }]);

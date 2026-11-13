@@ -1,5 +1,17 @@
 # Implementation ledger
 
+2026-11-13 adds explicit file dependencies to the local Unified Context runtime.
+Trusted authoring captures file scopes from the existing canonical Git traversal.
+Recorded source checks preserve active decisions across unrelated edits and stale
+decisions whose declared content, mode or index dependencies changed. Legacy
+repository-wide behavior, accepted evidence provenance and replay remain supported.
+This increment extends the development runtime. [Contract](unified-context-baseline.md#explicit-source-dependencies--2026-11-13)
+Windows build and **266/266** tests passed, including 12 new regressions. The
+current-content scan checked 176 files with zero findings, the production audit
+reported zero vulnerabilities, and the package dry-run contained 93 files.
+GitHub Actions records cross-platform checks for each pushed commit, including
+POSIX mode-change coverage. Deployment and live provider qualification remain pending.
+
 2026-11-10 adds task-scoped evidence query/read surfaces for CLI and MCP, lexical
 selection for runtime hydration, and repository-wide retention planning. Required
 decision/test/link evidence is protected. Historical bodies remain retrievable,
