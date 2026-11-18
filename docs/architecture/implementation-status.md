@@ -1,5 +1,12 @@
 # Implementation ledger
 
+2026-11-18 release update: the source-dependency, evidence-archival and durable
+invocation slices were committed on `phase1-runtime`, passed all four exact-commit
+CI jobs and were deployed to the three existing Codex/Antigravity bridge launchers.
+The [deployment record](local-deployment-2026-11-18.md) records package identity,
+verification, backups and independent task/environment schema compatibility.
+This supersedes the earlier local/uncommitted/undeployed snapshots below.
+
 2026-11-18 adds durable invocation fencing for opt-in resource-bound adapters.
 An environment transaction reserves the exact verified scope before a provider
 call. Pending calls survive process death, block later dispatch and appear in
