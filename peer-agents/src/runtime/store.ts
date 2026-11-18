@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import path from 'node:path';
 import * as z from 'zod/v4';
 import { assertNonSecret } from '../security.js';
 import { database, transaction } from './database.js';
@@ -11,6 +12,9 @@ import { resourceAssignmentSchema } from './resource-routing.js';
 import { acceptedDecisionSchema, decisionInvalidationSchema, decisionSourceCheckSchema, acceptDecision, invalidateDecisions, checkDecisionSources } from './decisions.js';
 import type { RepositorySnapshot } from './repository.js';
 import { evidenceReferences, evidenceRelevance, evidenceQuerySchema, evidenceReadSchema } from './evidence.js';
+import { directoryIdentity } from '../filesystem-identity.js';
+import { archivedEvidence, archiveEvidenceBody, restoreEvidenceBody, storageSelectionSchema, storagePlanSchema,
+  storageReceiptSchema, readStorageReceipt, MAX_ARCHIVE_BATCH_BYTES, type StoragePlan } from './evidence-storage.js';
 
 const text = z.string().min(1);
 const evidenceInputSchema = z.object({ text: z.string(), classification: z.enum(['PUBLIC', 'PROJECT']), source: text, version: text }).strict();
@@ -101,8 +105,15 @@ function reduce(state: TaskState | undefined, event: Event): TaskState {
 }
 export class TaskStore {
   private readonly db: DatabaseSync;
+  private readonly storageScope: string;
   constructor(file: string) {
-    this.db = database(file, 'task');
+    this.db = database(file, 'task', [1, 2]);
+    this.storageScope = file === ':memory:' ? digest(randomUUID())
+      : digest({ directory: directoryIdentity(path.dirname(file)).key, name: path.basename(file) });
+    if (this.storageVersion() === 2) {
+      try { this.db.prepare('SELECT operation_id, body FROM evidence_storage_operations LIMIT 0').all(); }
+      catch { this.db.close(); throw new Error('Missing evidence storage journal'); }
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS events(task_id TEXT NOT NULL, sequence INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(task_id,sequence)) STRICT;
       CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, revision INTEGER NOT NULL, state TEXT NOT NULL) STRICT;
@@ -218,7 +229,14 @@ export class TaskStore {
     const row = this.db.prepare('SELECT body FROM evidence WHERE id=?').get(id);
     if (!row) throw new Error('Missing evidence');
     try {
-      const value = evidenceSchema.parse(JSON.parse(String(row.body)));
+      let body = String(row.body);
+      if (archivedEvidence(body)) {
+        if (this.storageVersion() !== 2) throw new Error();
+        body = restoreEvidenceBody(body);
+      }
+      const parsed: unknown = JSON.parse(body);
+      assertNonSecret(parsed);
+      const value = evidenceSchema.parse(parsed);
       assertNonSecret(value);
       const { text, source, version, classification } = value;
       if (value.id !== id || digest({ text, source, version, classification }) !== id || contentHash(text) !== value.contentHash) throw new Error();
@@ -294,28 +312,104 @@ export class TaskStore {
   }
   /** Read-only repository-wide plan. No evidence, events, patches or approvals are deleted. */
   retentionReport() {
+    return transaction(this.db, () => this.retentionSnapshot());
+  }
+  private retentionSnapshot() {
+    const protectedIds = new Set<string>(), hotIds = new Set<string>();
+    const externalReferences = new Set<string>();
+    for (const row of this.db.prepare('SELECT id FROM tasks ORDER BY id').all()) {
+      const state = this.get(String(row.id));
+      for (const ref of evidenceReferences(state, this.events(state.id))) {
+        const exists = this.db.prepare('SELECT 1 FROM evidence WHERE id=?').get(ref.id);
+        if (ref.stored || exists) {
+          this.readEvidence(ref.id);
+          protectedIds.add(ref.id);
+          if (ref.mandatory) hotIds.add(ref.id);
+        } else externalReferences.add(ref.id);
+      }
+    }
+    const items = this.db.prepare('SELECT id, body FROM evidence ORDER BY id').all().map(row => {
+      const record = this.readEvidence(String(row.id));
+      const proposedTier = hotIds.has(record.id) ? 'HOT' : protectedIds.has(record.id) ? 'WARM' : 'COLD';
+      return { id: record.id, proposedTier, protected: protectedIds.has(record.id),
+        bytes: Buffer.byteLength(JSON.stringify(record), 'utf8'), storedBytes: Buffer.byteLength(String(row.body), 'utf8'),
+        physicalStorage: archivedEvidence(String(row.body)) ? 'ARCHIVED' : 'HOT' };
+    });
+    return { schemaVersion: 1, mode: 'PLAN_ONLY', policy: 'references-v1', items,
+      externalReferences: [...externalReferences].sort(), deletionAllowed: false };
+  }
+  private storageVersion(): number {
+    return Number(this.db.prepare("SELECT version FROM schema_meta WHERE domain='task'").get()!.version);
+  }
+  private prepareEvidenceStorage(action: StoragePlan['action'], ids: string[], operationId: string) {
+    storageSelectionSchema.parse({ ids });
+    const report = this.retentionSnapshot();
+    const changes: StoragePlan['changes'] = [];
+    const bodies = new Map<string, string>();
+    let totalBytes = 0;
+    for (const id of [...ids].sort()) {
+      const item = report.items.find(item => item.id === id);
+      if (!item) throw new Error('Unknown evidence selection');
+      const body = String(this.db.prepare('SELECT body FROM evidence WHERE id=?').get(id)!.body);
+      const isArchived = archivedEvidence(body);
+      if (action === 'archive' && (isArchived || item.proposedTier === 'HOT')) throw new Error('Only unarchived WARM or COLD evidence is eligible');
+      if (action === 'restore' && !isArchived) throw new Error('Evidence is already in HOT storage');
+      const original = action === 'archive' ? body : restoreEvidenceBody(body);
+      totalBytes += Buffer.byteLength(original, 'utf8');
+      if (totalBytes > MAX_ARCHIVE_BATCH_BYTES) throw new Error('Evidence exceeds the archive batch limit');
+      const replacement = action === 'archive' ? archiveEvidenceBody(original) : original;
+      bodies.set(id, replacement);
+      changes.push({ id, beforeHash: contentHash(body), afterHash: contentHash(replacement),
+        from: isArchived ? 'ARCHIVED' : 'HOT', to: action === 'archive' ? 'ARCHIVED' : 'HOT',
+        beforeBytes: Buffer.byteLength(body, 'utf8'), afterBytes: Buffer.byteLength(replacement, 'utf8') });
+    }
+    const tasks = this.db.prepare('SELECT id, revision FROM tasks ORDER BY id').all();
+    const operations = this.storageVersion() === 2 ? this.db.prepare('SELECT operation_id, body FROM evidence_storage_operations ORDER BY operation_id').all() : [];
+    for (const operation of operations) readStorageReceipt(String(operation.body), String(operation.operation_id));
+    const unsigned = { schemaVersion: 1 as const, operationId, action, ids: [...ids].sort(), scope: this.storageScope,
+      stateHash: digest({ tasks, operations, report }), changes };
+    return { plan: storagePlanSchema.parse({ ...unsigned, digest: digest(unsigned) }), bodies };
+  }
+  planEvidenceStorage(action: StoragePlan['action'], ids: string[]): StoragePlan {
+    storagePlanSchema.shape.action.parse(action);
+    return transaction(this.db, () => this.prepareEvidenceStorage(action, ids, randomUUID()).plan);
+  }
+  /** Operator surface. Encoding, schema migration and receipt commit together. */
+  applyEvidenceStorage(input: unknown) {
+    const plan = storagePlanSchema.parse(input);
+    const { digest: expectedDigest, ...unsigned } = plan;
+    if (plan.scope !== this.storageScope || digest(unsigned) !== expectedDigest) throw new Error('Evidence storage plan scope or integrity mismatch');
     return transaction(this.db, () => {
-      const protectedIds = new Set<string>(), hotIds = new Set<string>();
-      const externalReferences = new Set<string>();
-      for (const row of this.db.prepare('SELECT id FROM tasks ORDER BY id').all()) {
-        const state = this.get(String(row.id));
-        for (const ref of evidenceReferences(state, this.events(state.id))) {
-          const exists = this.db.prepare('SELECT 1 FROM evidence WHERE id=?').get(ref.id);
-          if (ref.stored || exists) {
-            this.readEvidence(ref.id);
-            protectedIds.add(ref.id);
-            if (ref.mandatory) hotIds.add(ref.id);
-          } else externalReferences.add(ref.id);
+      if (this.storageVersion() === 2) {
+        const previous = this.db.prepare('SELECT body FROM evidence_storage_operations WHERE operation_id=?').get(plan.operationId);
+        if (previous) {
+          const receipt = readStorageReceipt(String(previous.body), plan.operationId);
+          if (receipt.planDigest !== plan.digest) throw new Error('Conflicting evidence storage operation');
+          return receipt;
         }
       }
-      const items = this.db.prepare('SELECT id FROM evidence ORDER BY id').all().map(row => {
-        const record = this.readEvidence(String(row.id));
-        const proposedTier = hotIds.has(record.id) ? 'HOT' : protectedIds.has(record.id) ? 'WARM' : 'COLD';
-        return { id: record.id, proposedTier, protected: protectedIds.has(record.id),
-          bytes: Buffer.byteLength(JSON.stringify(record), 'utf8'), physicalStorage: record.retention };
-      });
-      return { schemaVersion: 1, mode: 'PLAN_ONLY', policy: 'references-v1', items,
-        externalReferences: [...externalReferences].sort(), deletionAllowed: false };
+      const prepared = this.prepareEvidenceStorage(plan.action, plan.ids, plan.operationId);
+      if (prepared.plan.digest !== plan.digest) throw new Error('Evidence storage plan expired; preview again');
+      if (this.storageVersion() === 1) {
+        this.db.exec(`
+          CREATE TABLE evidence_storage_operations(operation_id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT;
+          CREATE TRIGGER immutable_evidence_storage_update BEFORE UPDATE ON evidence_storage_operations BEGIN SELECT RAISE(ABORT,'storage operations are append-only'); END;
+          CREATE TRIGGER immutable_evidence_storage_delete BEFORE DELETE ON evidence_storage_operations BEGIN SELECT RAISE(ABORT,'storage operations are append-only'); END;
+          UPDATE schema_meta SET version=2 WHERE domain='task';
+        `);
+      }
+      for (const [id, body] of prepared.bodies) {
+        const update = this.db.prepare('UPDATE evidence SET body=? WHERE id=?').run(body, id);
+        if (update.changes !== 1 || this.db.prepare('SELECT body FROM evidence WHERE id=?').get(id)?.body !== body) {
+          throw new Error('Evidence storage write verification failed');
+        }
+        this.readEvidence(id);
+      }
+      const value = { schemaVersion: 1 as const, operationId: plan.operationId, action: plan.action, planDigest: plan.digest,
+        completedAt: new Date().toISOString(), changes: plan.changes };
+      const receipt = storageReceiptSchema.parse({ ...value, hash: digest(value) });
+      this.db.prepare('INSERT INTO evidence_storage_operations VALUES (?,?)').run(plan.operationId, canonical(receipt));
+      return receipt;
     });
   }
   acquire(resource: string, owner: string): void {

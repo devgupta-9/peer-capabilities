@@ -9,7 +9,8 @@ const id = z.string().min(1).max(128).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/);
 export const resourceBindingSchema = z.object({ workerId: id,
   bindingIds: z.array(id).min(1).max(256).refine(ids => new Set(ids).size === ids.length),
 }).strict();
-export type ResourceSource = Pick<EnvironmentManager, 'readResources' | 'getResourceObservation'>;
+export type ResourceSource = Pick<EnvironmentManager, 'readResources' | 'getResourceObservation'> &
+  Partial<Pick<EnvironmentManager, 'pendingResourceInvocations'>>;
 export type ResourceContext = { frontendVersion: string; configurationDigest: string };
 export const resourceAssignmentSchema = z.object({ scope: resourceObservationScopeSchema,
   catalogRevision: z.number().int().positive(), observationDigest: z.string().regex(/^[a-f0-9]{64}$/),
@@ -18,6 +19,8 @@ export const resourceAssignmentSchema = z.object({ scope: resourceObservationSco
 export type ResourceAssignment = z.infer<typeof resourceAssignmentSchema>;
 
 export const resourceNextAction = {
+  INVOCATION_PENDING: 'An invocation is pending or interrupted. Reconcile its processes and preserved task artifacts, then obtain fresh scoped verification. Do not replay it automatically.',
+  INVOCATION_STATE_REQUIRED: 'Resource-bound dispatch requires the durable environment invocation journal. Upgrade the environment integration.',
   ELIGIBLE: 'Eligible for resource routing only; task, repository and approval gates still apply.',
   NO_DISCOVERED_PROFILE: 'Check the exact configured model/effort and refresh official CLI model discovery.',
   RESOURCE_CATALOG_REQUIRED: 'No resource catalog exists. Explicit resource setup is required; doctor does not enroll resources.',
@@ -99,6 +102,8 @@ export function inspectResourceChoices(source: ResourceSource, frontend: string,
           }
           throw error;
         }
+        if (!source.pendingResourceInvocations) { report('INVOCATION_STATE_REQUIRED', scope); continue; }
+        if (source.pendingResourceInvocations(scope).length) { report('INVOCATION_PENDING', scope); continue; }
         const evidence = source.getResourceObservation(scope);
         if (evidence.status !== 'CURRENT') { report(evidence.status, scope); continue; }
         const o = evidence.observation;

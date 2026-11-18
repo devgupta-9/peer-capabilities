@@ -100,25 +100,27 @@ export class ResourceObservations {
     });
   }
   read(value: unknown): ResourceObservationResult {
+    return transaction(this.db, () => this.readInTransaction(value));
+  }
+  /** Internal environment operations already holding a transaction. */
+  readInTransaction(value: unknown): ResourceObservationResult {
     const scope = parse(resourceObservationScopeSchema, value);
-    return transaction(this.db, () => {
-      const observation = this.latest(scope);
-      if (!observation) return { status: 'UNKNOWN' };
-      // Clock rollback cannot make evidence observed in the future usable.
-      if (Date.parse(observation.observedAt) > Date.now() || Date.parse(observation.expiresAt) <= Date.now()) return { status: 'EXPIRED' };
-      const resources = new ResourceState(this.db), current = resources.read();
-      if (!current || current.revision < observation.resourceRevision) throw new Error('CORRUPT_RESOURCE_OBSERVATION');
-      const baseline = resources.read(observation.resourceRevision);
-      const original = baseline && fingerprint(baseline.catalog, scope);
-      if (!original) throw new Error('CORRUPT_RESOURCE_OBSERVATION');
-      // Inspect intervening revisions too: restoring old configuration must not
-      // resurrect old auth evidence. Unrelated resource additions are harmless.
-      for (let revision = observation.resourceRevision + 1; revision <= current.revision; revision++) {
-        const snapshot = revision === current.revision ? current : resources.read(revision);
-        if (!snapshot) throw new Error('CORRUPT_RESOURCE_STATE');
-        if (fingerprint(snapshot.catalog, scope) !== original) return { status: 'CONFIGURATION_CHANGED' };
-      }
-      return { status: 'CURRENT', observation };
-    });
+    const observation = this.latest(scope);
+    if (!observation) return { status: 'UNKNOWN' };
+    // Clock rollback cannot make evidence observed in the future usable.
+    if (Date.parse(observation.observedAt) > Date.now() || Date.parse(observation.expiresAt) <= Date.now()) return { status: 'EXPIRED' };
+    const resources = new ResourceState(this.db), current = resources.read();
+    if (!current || current.revision < observation.resourceRevision) throw new Error('CORRUPT_RESOURCE_OBSERVATION');
+    const baseline = resources.read(observation.resourceRevision);
+    const original = baseline && fingerprint(baseline.catalog, scope);
+    if (!original) throw new Error('CORRUPT_RESOURCE_OBSERVATION');
+    // Inspect intervening revisions too: restoring old configuration must not
+    // resurrect old auth evidence. Unrelated resource additions are harmless.
+    for (let revision = observation.resourceRevision + 1; revision <= current.revision; revision++) {
+      const snapshot = revision === current.revision ? current : resources.read(revision);
+      if (!snapshot) throw new Error('CORRUPT_RESOURCE_STATE');
+      if (fingerprint(snapshot.catalog, scope) !== original) return { status: 'CONFIGURATION_CHANGED' };
+    }
+    return { status: 'CURRENT', observation };
   }
 }

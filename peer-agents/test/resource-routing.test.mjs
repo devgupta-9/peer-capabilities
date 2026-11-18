@@ -13,6 +13,7 @@ import { Runtime } from '../dist/runtime/runner.js';
 import { inspectResourceChoices } from '../dist/runtime/resource-routing.js';
 import { recordInvocationFailure } from '../dist/runtime/resource-feedback.js';
 import { digest } from '../dist/runtime/identity.js';
+import { database } from '../dist/runtime/database.js';
 import { runtimeFixture } from './fixtures/runtime-fixture.mjs';
 
 const catalog = () => ({ schemaVersion: 1,
@@ -30,6 +31,15 @@ const config = () => ({ id: 'antigravity', executable: process.execPath, experim
   profiles: [{ model: 'fixture-model', effort: 'high', competence: 9, cost: 1, contextWindow: 64000 }],
 });
 const request = { role: 'lead', competence: 8, complexity: 'high', requiredContext: 2048 };
+const journalSource = environment => ({
+  readResources: (...args) => environment.readResources(...args),
+  getResourceObservation: (...args) => environment.getResourceObservation(...args),
+  recordResourceObservation: (...args) => environment.recordResourceObservation(...args),
+  canWriteResourceObservations: () => environment.canWriteResourceObservations(),
+  pendingResourceInvocations: (...args) => environment.pendingResourceInvocations(...args),
+  beginResourceInvocation: (...args) => environment.beginResourceInvocation(...args),
+  finishResourceInvocation: (...args) => environment.finishResourceInvocation(...args),
+});
 async function fixture(t, directory) {
   const root = directory ?? await mkdtemp(path.join(tmpdir(), 'peer-resource-routing-'));
   const environment = new EnvironmentManager(path.join(root, directory ? '.git/environment.sqlite' : 'environment.sqlite'), root);
@@ -337,6 +347,153 @@ function failureAdapter(f, failure = {}, source = f.environment, beforeResult = 
     invoke: (choice, role = 'lead') => adapter.execute({ id: 'fixture', taskId: 'fixture', cwd: f.root, role, choice, prompt: 'Fixture only' }) };
 }
 
+test('durable intent fences concurrent dispatch without renewing successful proof', async t => {
+  const f = await fixture(t), original = f.record(); f.record('reviewer');
+  const choice = selectAgent((await f.adapter.discover()).choices, request);
+  let calls = 0;
+  const adapter = new ProviderAdapter(config(), undefined, async (command, args, options) => {
+    if (args[0] === '--version' || args[0] === 'models') return f.capture(command, args, options);
+    calls++;
+    const pending = f.environment.pendingResourceInvocations(choice.resource.scope);
+    assert.equal(pending.length, 1, 'Intent must be committed before provider launch');
+    assert.equal(pending[0].assignment.observationDigest, digest(original));
+    assert.equal((await f.invoke(choice)).availability, 'POLICY_BLOCKED');
+    const doctor = await f.adapter.resourceDoctor();
+    assert.equal(doctor.diagnostics.find(d => d.scope.role === 'lead').reason, 'INVOCATION_PENDING');
+    assert.ok((await f.adapter.discover()).choices.some(c => c.roles.includes('reviewer')));
+    return f.capture(command, args, options);
+  }, f.environment);
+  const invoke = () => adapter.execute({ id: 'concurrent', taskId: 'task', cwd: f.root, role: 'lead', choice, prompt: 'Fixture' });
+  const results = await Promise.all([invoke(), invoke()]);
+  assert.equal(calls, 1);
+  assert.deepEqual(results.map(r => r.availability).sort(), ['AVAILABLE', 'POLICY_BLOCKED']);
+  assert.deepEqual(f.environment.pendingResourceInvocations(choice.resource.scope), []);
+  assert.deepEqual(f.environment.getResourceObservation(choice.resource.scope).observation, original);
+  assert.throws(() => database(path.join(f.root, 'environment.sqlite'), 'environment'), /migration version/);
+});
+
+test('terminated provider call remains fenced after reopen and needs trusted reconciliation', async t => {
+  for (const stage of ['during-call', 'after-result']) {
+  const f = await fixture(t); f.record();
+  const choice = selectAgent((await f.adapter.discover()).choices, request);
+  const environmentUrl = new URL('../dist/runtime/environment.js', import.meta.url).href;
+  const adapterUrl = new URL('../dist/runtime/adapters.js', import.meta.url).href;
+  const source = `import { EnvironmentManager } from ${JSON.stringify(environmentUrl)};
+    import { ProviderAdapter } from ${JSON.stringify(adapterUrl)};
+    const [root, configuration, choice, stage] = JSON.parse(process.argv[1]);
+    const environment = new EnvironmentManager(root + '/environment.sqlite', root);
+    if (stage === 'after-result') environment.finishResourceInvocation = () => process.exit(73);
+    const adapter = new ProviderAdapter(configuration, undefined, async (_command, args) => {
+      if (!['--version', 'models'].includes(args[0])) {
+        if (stage === 'during-call') process.exit(73);
+        return {code:0, stdout:JSON.stringify({event:'result',result:{status:'SUCCESS',response:'Done'}}),stderr:''};
+      }
+      return {code:0, stdout: args[0] === '--version' ? 'fixture-cli-1.0' : 'fixture-model', stderr:''};
+    }, environment);
+    await adapter.execute({id:'interrupted',taskId:'preserved-task',cwd:root,role:'lead',choice,prompt:'NEVER_PERSIST_PROMPT'});`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', source, JSON.stringify([f.root, config(), choice, stage])], { encoding: 'utf8' });
+  assert.equal(child.status, 73, child.stderr);
+  const reopened = new EnvironmentManager(path.join(f.root, 'environment.sqlite'), f.root);
+  try {
+    const [intent] = reopened.pendingResourceInvocations(choice.resource.scope);
+    assert.ok(intent); assert.equal(intent.ownerPid, child.pid);
+    assert.equal(JSON.stringify(intent).includes('NEVER_PERSIST_PROMPT'), false);
+    const adapter = new ProviderAdapter(config(), undefined, f.capture, reopened);
+    assert.deepEqual((await adapter.discover()).choices, []);
+    assert.equal((await f.invoke(choice)).availability, 'POLICY_BLOCKED'); assert.equal(f.calls(), 0);
+    assert.throws(() => reopened.reconcileResourceInvocation(intent, 'c'.repeat(64)), /FRESH_VERIFICATION_REQUIRED/);
+    if (Date.now() <= Date.parse(intent.startedAt)) await new Promise(resolve => setTimeout(resolve, 5));
+    f.record('lead', { observedAt: new Date().toISOString() });
+    assert.deepEqual((await adapter.discover()).choices, [], 'Fresh verification alone cannot erase the intent');
+    assert.throws(() => reopened.reconcileResourceInvocation({ ...intent, taskHash: '0'.repeat(64) }, 'c'.repeat(64)), /CONFLICT/);
+    reopened.reconcileResourceInvocation(intent, 'c'.repeat(64));
+    reopened.reconcileResourceInvocation(intent, 'c'.repeat(64));
+    assert.throws(() => reopened.reconcileResourceInvocation(intent, 'd'.repeat(64)), /CONFLICT/);
+    assert.equal((await adapter.discover()).choices.length, 1);
+    assert.equal(f.calls(), 0, 'Reconciliation must not replay a provider call');
+  } finally { reopened.close(); }
+  }
+});
+
+test('an ignored failure observation cannot release the invocation fence', async t => {
+  const f = await fixture(t); f.record(); const choice = selectAgent((await f.adapter.discover()).choices, request);
+  const db = new DatabaseSync(path.join(f.root, 'environment.sqlite'));
+  try {
+    db.exec('CREATE TRIGGER ignore_feedback BEFORE INSERT ON resource_observations BEGIN SELECT RAISE(IGNORE); END;');
+    assert.equal((await failureAdapter(f).invoke(choice)).resourceFeedback, 'FAILED');
+    assert.equal(f.environment.pendingResourceInvocations(choice.resource.scope).length, 1);
+    assert.deepEqual((await f.adapter.discover()).choices, []);
+  } finally { db.close(); }
+});
+
+test('failed completion persistence remains fenced for another process and withholds success', async t => {
+  const f = await fixture(t); f.record(); const choice = selectAgent((await f.adapter.discover()).choices, request);
+  const source = { ...journalSource(f.environment), finishResourceInvocation: () => { throw new Error('PRIVATE_SENTINEL'); } };
+  const adapter = new ProviderAdapter(config(), undefined, f.capture, source);
+  const result = await adapter.execute({ id: 'failed-write', taskId: 'task', cwd: f.root, role: 'lead', choice, prompt: 'Fixture' });
+  assert.equal(result.availability, 'EXECUTION_ERROR'); assert.equal(result.resourceFeedback, 'FAILED');
+  assert.equal(JSON.stringify(result).includes('PRIVATE_SENTINEL'), false);
+  const reopened = new EnvironmentManager(path.join(f.root, 'environment.sqlite'), f.root, { readOnly: true });
+  try {
+    assert.equal(reopened.pendingResourceInvocations(choice.resource.scope).length, 1);
+    assert.deepEqual((await new ProviderAdapter(config(), undefined, f.capture, reopened).discover()).choices, []);
+  } finally { reopened.close(); }
+  const [intent] = f.environment.pendingResourceInvocations(choice.resource.scope);
+  assert.throws(() => f.environment.reconcileResourceInvocation(intent, 'a'.repeat(64)), /OWNER_ACTIVE/);
+});
+
+test('reservation migration failure rolls back before any provider call', async t => {
+  const f = await fixture(t); f.record(); const choice = selectAgent((await f.adapter.discover()).choices, request);
+  const db = new DatabaseSync(path.join(f.root, 'environment.sqlite'));
+  try {
+    db.exec("CREATE TRIGGER fail_migration BEFORE UPDATE ON schema_meta BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;");
+    assert.equal((await f.invoke(choice)).availability, 'POLICY_BLOCKED'); assert.equal(f.calls(), 0);
+    assert.equal(db.prepare('SELECT version FROM schema_meta').get().version, 1);
+    assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'resource_invocation%'").get().n, 0);
+    db.exec('DROP TRIGGER fail_migration');
+    assert.equal((await f.invoke(choice)).availability, 'AVAILABLE');
+  } finally { db.close(); }
+});
+
+test('stale reservation and ignored journal writes fail closed', async t => {
+  const f = await fixture(t); const original = f.record(); const choice = selectAgent((await f.adapter.discover()).choices, request);
+  const intent = f.environment.beginResourceInvocation(choice.resource, 'invocation', 'task');
+  assert.throws(() => f.environment.beginResourceInvocation(choice.resource, 'another', 'task'), /PENDING/);
+  const db = new DatabaseSync(path.join(f.root, 'environment.sqlite'));
+  try {
+    db.exec('CREATE TRIGGER ignore_completion BEFORE INSERT ON resource_invocation_completions BEGIN SELECT RAISE(IGNORE); END;');
+    assert.throws(() => f.environment.finishResourceInvocation(intent, 'AVAILABLE'), /WRITE_FAILED/);
+    assert.equal(f.environment.pendingResourceInvocations(choice.resource.scope).length, 1);
+    db.exec('DROP TRIGGER ignore_completion');
+    f.environment.finishResourceInvocation(intent, 'AVAILABLE');
+    f.environment.finishResourceInvocation(intent, 'AVAILABLE');
+    assert.throws(() => f.environment.finishResourceInvocation(intent, 'TIMEOUT'), /CONFLICT/);
+    db.exec('CREATE TRIGGER ignore_intent BEFORE INSERT ON resource_invocations BEGIN SELECT RAISE(IGNORE); END;');
+    assert.equal((await f.invoke(choice)).availability, 'POLICY_BLOCKED'); assert.equal(f.calls(), 0);
+    assert.deepEqual(f.environment.getResourceObservation(choice.resource.scope).observation, original);
+    db.exec('DROP TRIGGER ignore_intent');
+    f.record('lead', { observedAt: new Date().toISOString() });
+    assert.throws(() => f.environment.beginResourceInvocation(choice.resource, 'stale', 'task'), /CONFLICT/);
+  } finally { db.close(); }
+});
+
+test('corrupt completion and clock rollback cannot silently lift a durable fence', async t => {
+  const f = await fixture(t); f.record(); const choice = selectAgent((await f.adapter.discover()).choices, request);
+  const intent = f.environment.beginResourceInvocation(choice.resource, 'clock', 'task');
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(intent.startedAt) - 1 });
+  assert.throws(() => f.environment.finishResourceInvocation(intent, 'AVAILABLE'), /CLOCK_CHANGED/);
+  assert.equal(f.environment.pendingResourceInvocations(choice.resource.scope).length, 1);
+  t.mock.timers.reset();
+  f.environment.finishResourceInvocation(intent, 'AVAILABLE');
+  const db = new DatabaseSync(path.join(f.root, 'environment.sqlite'));
+  try {
+    assert.throws(() => db.exec('DELETE FROM resource_invocations'), /Immutable/);
+    db.exec("DROP TRIGGER immutable_resource_completion_update; UPDATE resource_invocation_completions SET digest='bad';");
+    await assert.rejects(f.adapter.discover(), /CORRUPT_RESOURCE_INVOCATION/);
+    assert.equal((await f.adapter.resourceDoctor()).reason, 'INSPECTION_FAILED');
+  } finally { db.close(); }
+});
+
 test('invocation quota failure durably revokes exact evidence without expiring back into success', async t => {
   const f = await fixture(t); f.record();
   const selected = selectAgent((await f.adapter.discover()).choices, request);
@@ -463,6 +620,9 @@ test('failure persistence errors stop further dispatch and expose no raw error',
   const f = await fixture(t); f.record(); const selected = selectAgent((await f.adapter.discover()).choices, request);
   const source = { readResources: () => f.environment.readResources(),
     getResourceObservation: scope => f.environment.getResourceObservation(scope), canWriteResourceObservations: () => true,
+    pendingResourceInvocations: scope => f.environment.pendingResourceInvocations(scope),
+    beginResourceInvocation: (...args) => f.environment.beginResourceInvocation(...args),
+    finishResourceInvocation: (...args) => f.environment.finishResourceInvocation(...args),
     recordResourceObservation: () => { throw new Error('PRIVATE_DIAGNOSTIC_SENTINEL'); } };
   const bad = failureAdapter(f, {}, source); const result = await bad.invoke(selected);
   assert.equal(result.resourceFeedback, 'FAILED'); assert.equal(result.availability, 'EXECUTION_ERROR');

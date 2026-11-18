@@ -106,9 +106,27 @@ failures now revoke the exact selected proof in environment state. Successful ca
 do not extend its lifetime. Newer proof is preserved; other roles/bindings are not
 implicitly changed. Task/review reasons report whether feedback was `RECORDED`,
 `SUPERSEDED` or `FAILED`. A persisted reviewer outage may use compensating tests;
-failure to persist feedback blocks the task and adapter instance. Repair storage
-and obtain fresh trusted verification before reopening it. A new process does not
-inherit an in-memory failure latch when the database could not accept a write.
+failure to persist feedback blocks the task and adapter instance. A durable intent
+is committed before a resource-bound provider call. If completion cannot be saved,
+the pending intent blocks further dispatch even after reopening the environment.
+Repair storage and reconcile preserved processes/artifacts before fresh verification
+and trusted recovery. No call is automatically replayed.
+
+`resources doctor` reports `INVOCATION_PENDING` for the exact affected scope.
+Other scopes retain their own evidence and policy. Expiry or fresh verification
+alone cannot remove the fence. Trusted operator library code can inspect
+`EnvironmentManager.pendingResourceInvocations(scope)` and, after process/artifact
+reconciliation and fresh scoped verification, call
+`reconcileResourceInvocation(intent, evidenceReference)`. Recovery checks the exact
+intent and refuses a live/reused owner PID. The evidence reference is a non-secret
+hash supplied by trusted code, not a proof of human approval. This writer is absent
+from CLI/MCP; process-tree reconciliation is not automated or certified yet.
+
+The first reservation upgrades the environment database to schema version 2.
+Keep compatible runtime/state backups and stop old readers before upgrading;
+mixed-runtime use and in-place downgrade are unsupported. Task archival's separate
+version-2 migration and the workspace-enrollment registry are independent.
+See [ADR-012](decisions/012-durable-resource-invocations.md).
 
 The [provider-context audit](architecture/provider-context-audit-2026-10-29.md)
 keeps live scoped collection gated. This feedback path does not authorize accounts,
@@ -222,15 +240,41 @@ visible. Trusted library authors can append `EVIDENCE_LINKED` events with an evi
 ID and optional `mandatory` flag. The public host surfaces expose retrieval.
 
 The retention command produces a read-only HOT/WARM/COLD plan across repository
-tasks. Historical references remain protected. Physical storage stays HOT, with
-archival/deletion and recovery qualification deferred. These inspection commands
-use existing task state and accept no `--apply`.
+tasks. Historical references remain protected. `physicalStorage` shows HOT or
+ARCHIVED, and `storedBytes` reports the current encoded record size. Inspection
+commands use existing task state.
+
+### Reversible evidence storage
+
+Select explicit evidence IDs in a JSON file shaped as `{"ids":["<evidence-id>"]}`.
+Preview the operation, inspect the returned scope, hashes and byte counts, then
+apply that saved plan.
+
+```powershell
+node bin/peer-capabilities.mjs retention archive --repo REPOSITORY --input selection.json > archive-plan.json
+node bin/peer-capabilities.mjs retention archive --repo REPOSITORY --input archive-plan.json --apply
+node bin/peer-capabilities.mjs retention restore --repo REPOSITORY --input selection.json > restore-plan.json
+node bin/peer-capabilities.mjs retention restore --repo REPOSITORY --input restore-plan.json --apply
+```
+
+Each plan supports 1–100 IDs and at most 32 MiB of original record bytes, with a
+16 MiB individual archive limit. Archive eligibility covers unarchived WARM/COLD
+records whose encoding reduces stored bytes. A changed plan dependency requires
+a fresh preview. Repeating the same plan returns its original operation receipt,
+including after a later restore. Use a fresh plan for a subsequent operation.
+
+The first archive apply upgrades the task database to schema version 2. Use a
+compatible runtime for reads and restoration. Restore retains the version-2
+journal. Existing evidence query/read and task replay decode archived records
+automatically. Later mandatory references can use already archived records through
+the same validated read path. The CLI/library owns storage mutations, and the MCP
+surface provides evidence retrieval. [Storage decision](decisions/011-evidence-archival.md)
 
 ## Limits
 Baseline allocation is conservative and byte-estimated. Mandatory material that
 cannot fit fails explicitly. Delta logic is unit-tested, but real adapters currently
 use fresh sessions/full packages; verified live delta/session reuse is not complete.
-Graphify/Headroom/Jev connectors, cross-task decision promotion, physical archival/compaction,
+Graphify/Headroom/Jev connectors, cross-task decision promotion, physical compaction/deletion,
 specialist/re-review flows, trusted host approvals and live platform certification
 remain planned. Their switches are reserved configuration, not evidence of active
 connectors. All fixture scenarios run without requiring any optional integration.

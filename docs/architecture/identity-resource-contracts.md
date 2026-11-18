@@ -416,3 +416,48 @@ feedback and collection modules (89 files); whitespace checks passed. Local revi
 completed; no independent peer approval is claimed. This is deterministic local
 evidence, not live provider certification or remote three-platform CI. No live
 configuration change, deployment, commit or push occurred.
+
+## Durable invocation fencing — eighth increment (2026-11-18)
+
+This increment supersedes the seventh increment's resource-bound invocation crash
+limitation. A committed intent now precedes external execution; failure feedback
+and a checksum-validated completion follow it. The environment transaction checks
+the selected catalog revision, exact observation digest, expiry and policy before
+reserving the scope. Concurrent calls for that exact scope cannot both start.
+
+Process death during execution or after a result but before completion leaves a
+durable fence. The same routing evaluator used by doctor and dispatch reports
+`INVOCATION_PENDING` after restart, even when old verification expires. Completion
+storage errors withhold the provider result as success and report feedback failure.
+Successful calls do not renew proof. Newer observations remain protected by the
+existing conditional failure-feedback path; ignored negative writes cannot release
+the original successful proof. Invalid/missing journal support blocks bound calls.
+
+Trusted library reconciliation requires the exact intent, an opaque evidence hash,
+absence of its original owner process and new current verification observed after
+the call began. Its caller must first reconcile descendant processes and task
+artifacts. PID absence and a supplied hash do not independently prove that work.
+No CLI/MCP recovery writer is exposed, and no task is automatically resumed.
+The task's existing interruption and human-approval gates remain intact.
+
+The first intent atomically upgrades only the runtime environment database to
+version 2. Existing resource records and verification lifetimes are unchanged.
+New readers support environment versions 1/2; old readers reject newly opened
+version-2 state. Stop old processes before upgrade and preserve compatible backups.
+Task storage and workspace enrollment remain independent. Journal records are
+append-only with no automatic pruning. [ADR-012](../decisions/012-durable-resource-invocations.md)
+
+Seven new regression cases cover concurrent dispatch, process termination during
+and after execution, reopen/reconciliation, fresh-verification requirements,
+ignored observation/journal writes, migration rollback, completion storage failure,
+checksum corruption, active owners and clock rollback. The focused resource suite
+passed **35/35** on Windows. Build and the complete suite passed **284/284**, including
+the earlier archival process-termination case. The publication scan checked 181
+files with zero findings, the production dependency audit reported zero
+vulnerabilities, and the package dry-run included 97 files with both invocation
+and archival modules. Whitespace checks passed. Remote CI has not run this slice.
+
+This is deterministic development evidence, not live provider/session certification.
+Legacy unbound adapters do not gain a durable-resource guarantee. Automatic child
+process cleanup, interrupted-task resumption and certified recovery UI remain later
+work. No live settings, credentials, deployment, commit or push were changed.

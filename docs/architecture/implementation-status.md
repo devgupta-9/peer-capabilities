@@ -1,5 +1,33 @@
 # Implementation ledger
 
+2026-11-18 adds durable invocation fencing for opt-in resource-bound adapters.
+An environment transaction reserves the exact verified scope before a provider
+call. Pending calls survive process death, block later dispatch and appear in
+resource doctor. Successful calls retain the original proof/expiry; failed calls
+persist negative feedback before releasing their reservation. Completion storage
+failure preserves the fence. A trusted library reconciliation path requires fresh
+verification and process/artifact reconciliation; it cannot resume tasks or grant
+approval. The first reservation upgrades environment schema 1 to 2 independently
+of task evidence archival. [ADR-012](../decisions/012-durable-resource-invocations.md)
+This increment remains local, uncommitted and undeployed. Verification is recorded
+in the resource-contract continuation; no live-provider certification is implied.
+Windows build and **284/284** full-suite tests passed, including seven new invocation
+cases and all existing archival tests. Publication scan: 181 files, zero findings.
+Production audit: zero vulnerabilities. Package dry-run: 97 files. Remote CI is pending.
+
+2026-11-13 adds local reversible evidence archival and restoration. Explicit
+operator plans bind scope and storage state. Apply atomically replaces selected
+WARM/COLD bodies, migrates the task schema to version 2 and records an append-only
+receipt. Exact reads, hydration and historical replay decode original records.
+Restoration preserves their original bytes and metadata. Deployment and remote CI
+remain pending. [Storage decision](../decisions/011-evidence-archival.md)
+Windows build and the **276/276** full-suite run passed. A subsequently added
+process-termination recovery regression also passed independently. Eleven new
+archival cases now cover exact restoration, replay, eligibility, stale plans,
+interrupted writes, schema compatibility, corruption, bounds and CLI/MCP reads.
+The publication scan checked 179 files with zero findings. Production dependencies
+had zero reported vulnerabilities, and the package dry-run included 95 files.
+
 2026-11-13 adds explicit file dependencies to the local Unified Context runtime.
 Trusted authoring captures file scopes from the existing canonical Git traversal.
 Recorded source checks preserve active decisions across unrelated edits and stale

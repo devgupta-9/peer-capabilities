@@ -16,6 +16,7 @@ import { PACKAGE_VERSION } from '../version.js';
 import { selectTaskTools } from '../tool-selection.js';
 import { registerTaskToolSelector } from '../tool-selection-host.js';
 import { McpServer } from '@modelcontextprotocol/server';
+import { storageSelectionSchema, storagePlanSchema } from './evidence-storage.js';
 
 const configSchema = z.object({
   agents: z.array(adapterConfigSchema),
@@ -41,6 +42,7 @@ export async function main(argv: string[]): Promise<void> {
     console.log('Projects: project add <absolute-root> | remove <absolute-root> | list | check <absolute-path>\nEnrollment is explicit additional trust, not required for a host-reported active Git workspace.');
     console.log('Resources: resources doctor --repo REPOSITORY --config FILE [--state-dir DIRECTORY]\nRead-only scoped eligibility inspection. Runs CLI discovery only; no model calls, enrollment, login or evidence renewal.');
     console.log('Evidence: evidence query|read --repo REPOSITORY --id TASK [--input JSON_FILE]\nRetention: retention --repo REPOSITORY\nInspect existing task state. Retention produces a read-only plan.');
+    console.log('Evidence storage: retention archive|restore --repo REPOSITORY --input SELECTION_JSON\nApply the returned plan with --input PLAN_JSON --apply. Originals remain recoverable.');
     console.log('Peer Capabilities (development; not release-certified)\nCommands: setup doctor update sync repair rollback uninstall version discover verify run resume status mcp\nEnvironment: --manifest FILE --root DIRECTORY [--state-dir DIRECTORY] [--apply]\nTasks: --repo REPOSITORY --config FILE [--objective TEXT] [--id UUID] [--checkpoint-only]\nsetup/update/sync/repair preview changes unless --apply. CLI/MCP integration is disabled pending trusted host approval. Inspect the verified patch for deliberate manual integration. No npm postinstall mutations.');
     return;
   }
@@ -72,18 +74,28 @@ export async function main(argv: string[]): Promise<void> {
     throw new Error('Unknown project command; use add, remove, list or check');
   }
   if (command === 'evidence' || command === 'retention') {
-    if (!v.repo || v.apply) throw new Error('Evidence inspection requires --repo and accepts no --apply');
+    if (!v.repo) throw new Error('Evidence operations require --repo');
     const action = positionals[1];
-    if (command === 'evidence' && (!v.id || !['query', 'read'].includes(action) || positionals.length !== 2)) {
+    if (command === 'evidence' && (v.apply || !v.id || !['query', 'read'].includes(action) || positionals.length !== 2)) {
       throw new Error('Use evidence query|read --repo REPOSITORY --id TASK [--input JSON_FILE]');
     }
-    if (command === 'retention' && positionals.length !== 1) throw new Error('Use retention --repo REPOSITORY');
+    if (command === 'retention' && (action
+      ? !['archive', 'restore'].includes(action) || positionals.length !== 2 || !v.input
+      : positionals.length !== 1 || v.apply)) throw new Error('Use retention [archive|restore --input FILE [--apply]] --repo REPOSITORY');
     const root = await repositoryRoot(path.resolve(v.repo));
     const file = path.join(await stateDirectory(root), 'tasks.sqlite');
     await access(file);
     const store = new TaskStore(file);
     try {
-      if (command === 'retention') print(store.retentionReport());
+      if (command === 'retention' && !action) print(store.retentionReport());
+      else if (command === 'retention') {
+        const request = await json(v.input!);
+        if (v.apply) {
+          const plan = storagePlanSchema.parse(request);
+          if (plan.action !== action) throw new Error('Storage plan action mismatch');
+          print(store.applyEvidenceStorage(plan));
+        } else print(store.planEvidenceStorage(action as 'archive' | 'restore', storageSelectionSchema.parse(request).ids));
+      }
       else {
         const request = v.input ? await json(v.input) : {};
         print(action === 'query' ? store.queryEvidence(v.id!, request) : store.readTaskEvidence(v.id!, request));

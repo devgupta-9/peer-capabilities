@@ -12,6 +12,10 @@ import * as z from 'zod/v4';
 import type { Observation } from './contracts.js';
 import { ResourceState, type ResourceSnapshot } from './resource-state.js';
 import { ResourceObservations, type ResourceObservation, type ResourceObservationResult } from './resource-observations.js';
+import { ResourceInvocations, type ResourceInvocation } from './resource-invocations.js';
+import { resourceAssignmentSchema } from './resource-routing.js';
+import type { Availability } from './contracts.js';
+import { resolveResource } from './resources.js';
 
 type Owned = { id: string; destination: string; hash: string; manifestDigest: string };
 type Operation = { id: string; destination: string; before: string | null; after: string | null; previous: Owned | null; restoreOwnership?: Owned | null };
@@ -41,7 +45,7 @@ export class EnvironmentManager {
         const schema = this.db.prepare('SELECT domain, version FROM schema_meta').all();
         const scope = this.db.prepare('SELECT root FROM environment_scope WHERE id=1').get();
         const pin = this.db.prepare('SELECT identity FROM environment_identity WHERE id=1').get();
-        if (schema.length !== 1 || schema[0].domain !== 'environment' || schema[0].version !== 1 ||
+        if (schema.length !== 1 || schema[0].domain !== 'environment' || ![1, 2].includes(Number(schema[0].version)) ||
           scope?.root !== this.root || pin?.identity !== this.identity.key) throw new Error();
       } catch {
         this.db.close(); throw new Error('ENVIRONMENT_INSPECTION_FAILED');
@@ -64,7 +68,7 @@ export class EnvironmentManager {
         }
       } finally { existing.close(); }
     }
-    this.db = database(file, 'environment');
+    this.db = database(file, 'environment', [1, 2]);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS ownership(id TEXT PRIMARY KEY, destination TEXT UNIQUE NOT NULL, body TEXT NOT NULL) STRICT;
       CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY, body TEXT NOT NULL) STRICT;
@@ -105,6 +109,59 @@ export class EnvironmentManager {
   getResourceObservation(scope: unknown): ResourceObservationResult {
     assertIdentity(this.identity);
     return new ResourceObservations(this.db).read(scope);
+  }
+  pendingResourceInvocations(scope: ResourceObservation['scope']): ResourceInvocation[] {
+    assertIdentity(this.identity);
+    return transaction(this.db, () => new ResourceInvocations(this.db).pending(scope));
+  }
+  beginResourceInvocation(value: unknown, invocationId: string, taskId: string): ResourceInvocation {
+    assertIdentity(this.identity);
+    const assignment = resourceAssignmentSchema.parse(value);
+    return transaction(this.db, () => {
+      const current = new ResourceObservations(this.db).readInTransaction(assignment.scope);
+      const catalog = new ResourceState(this.db).read();
+      if (!catalog || catalog.revision !== assignment.catalogRevision || current.status !== 'CURRENT' ||
+        digest(current.observation) !== assignment.observationDigest || current.observation.expiresAt !== assignment.expiresAt ||
+        current.observation.verification !== 'VERIFIED') throw new Error('RESOURCE_INVOCATION_CONFLICT');
+      resolveResource(catalog.catalog, assignment.scope, { schemaVersion: 1, role: assignment.scope.role,
+        effort: assignment.scope.effort, features: [], minimumCompetence: 0, requiredContext: 1 });
+      return new ResourceInvocations(this.db).begin(assignment, invocationId, taskId);
+    });
+  }
+  finishResourceInvocation(intent: ResourceInvocation, outcome: Availability): void {
+    assertIdentity(this.identity);
+    transaction(this.db, () => {
+      const journal = new ResourceInvocations(this.db), current = journal.read(intent.id);
+      if (!current || digest(current.intent) !== digest(intent)) throw new Error('RESOURCE_INVOCATION_CONFLICT');
+      if (!current.completion && !['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(outcome)) {
+        const observed = new ResourceObservations(this.db).readInTransaction(intent.assignment.scope);
+        if (observed.status === 'CURRENT' && digest(observed.observation) === intent.assignment.observationDigest) {
+          throw new Error('RESOURCE_FEEDBACK_NOT_PERSISTED');
+        }
+      }
+      journal.finish(intent.id, digest(intent), outcome);
+    });
+  }
+  /** Trusted operator library only, never CLI/MCP. The reference attests that
+   * child processes and task artifacts were reconciled; PID absence alone does not.
+   * This releases resource eligibility, never task execution/integration gates. */
+  reconcileResourceInvocation(intent: ResourceInvocation, evidenceReference: string): void {
+    assertIdentity(this.identity);
+    if (!/^[a-f0-9]{64}$/.test(evidenceReference)) throw new Error('INVALID_RECONCILIATION_EVIDENCE');
+    transaction(this.db, () => {
+      const journal = new ResourceInvocations(this.db), current = journal.read(intent.id);
+      if (!current || digest(current.intent) !== digest(intent)) throw new Error('RESOURCE_INVOCATION_CONFLICT');
+      if (current.completion) {
+        journal.finish(intent.id, digest(intent), 'RECONCILED', evidenceReference); return;
+      }
+      try { process.kill(intent.ownerPid, 0); throw new Error('INVOCATION_OWNER_ACTIVE'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error('INVOCATION_OWNER_ACTIVE'); }
+      const observed = new ResourceObservations(this.db).readInTransaction(intent.assignment.scope);
+      if (observed.status !== 'CURRENT' || observed.observation.verification !== 'VERIFIED' ||
+        digest(observed.observation) === intent.assignment.observationDigest ||
+        Date.parse(observed.observation.observedAt) <= Date.parse(intent.startedAt)) throw new Error('FRESH_VERIFICATION_REQUIRED');
+      journal.finish(intent.id, digest(intent), 'RECONCILED', evidenceReference);
+    });
   }
   private async destination(relative: string): Promise<string> {
     if (path.isAbsolute(relative) || relative.split(/[\\/]/).some(x => x === '..' || x.includes(':'))) throw new Error('Path escape');

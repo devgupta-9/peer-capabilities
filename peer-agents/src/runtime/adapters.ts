@@ -13,6 +13,7 @@ import { bindResourceChoices, inspectResourceChoices, resourceNextAction, resour
 import { digest } from './identity.js';
 import type { EnvironmentManager } from './environment.js';
 import { recordInvocationFailure } from './resource-feedback.js';
+import type { ResourceInvocation } from './resource-invocations.js';
 
 export const adapterConfigSchema = z.object({
   id: z.enum(['codex', 'antigravity']), executable: z.string().min(1).optional(),
@@ -27,7 +28,8 @@ export const adapterConfigSchema = z.object({
 }).strict();
 type Config = z.input<typeof adapterConfigSchema>;
 type Provider = 'codex' | 'antigravity';
-type AdapterResourceStore = ResourceSource & Partial<Pick<EnvironmentManager, 'recordResourceObservation' | 'canWriteResourceObservations'>>;
+type AdapterResourceStore = ResourceSource & Partial<Pick<EnvironmentManager, 'recordResourceObservation' | 'canWriteResourceObservations'
+  | 'beginResourceInvocation' | 'finishResourceInvocation'>>;
 export type ResourceDoctorReport = {
   frontend: Provider; status: 'ELIGIBLE' | 'BLOCKED' | 'NOT_RESOURCE_BOUND';
   reason?: string; nextAction?: string; catalogRevision?: number;
@@ -198,23 +200,37 @@ export class ProviderAdapter implements AgentAdapter {
       return { availability: 'POLICY_BLOCKED', response: 'Exact choice/authentication/experimental policy not satisfied' };
     }
     if (this.config.resources && (!this.resourceSource?.recordResourceObservation ||
+      !this.resourceSource.beginResourceInvocation || !this.resourceSource.finishResourceInvocation ||
       this.resourceSource.canWriteResourceObservations?.() !== true)) {
       return { availability: 'POLICY_BLOCKED', response: 'Bound execution requires writable resource feedback state' };
     }
-    const result = await this.invoke({ ...input, choice: { ...selected, effort: input.choice.effort } });
-    if (!this.config.resources || !selected.resource || ['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(result.availability)) return result;
+    let intent: ResourceInvocation | undefined;
+    if (selected.resource) {
+      try { intent = this.resourceSource!.beginResourceInvocation!(selected.resource, input.id, input.taskId); }
+      catch { return { availability: 'POLICY_BLOCKED', response: 'Durable invocation reservation failed; inspect resource state before retrying' }; }
+    }
+    let result: AgentResult;
+    try { result = await this.invoke({ ...input, choice: { ...selected, effort: input.choice.effort } }); }
+    catch { result = { availability: 'EXECUTION_ERROR', response: 'Provider invocation failed; raw diagnostics withheld' }; }
+    if (!intent || !selected.resource) return result;
     try {
       const source = this.resourceSource!;
-      const resourceFeedback = await recordInvocationFailure({
-        readResources: revision => source.readResources(revision),
-        getResourceObservation: scope => source.getResourceObservation(scope),
-        recordResourceObservation: (value, expected) => source.recordResourceObservation!(value, expected),
-      }, selected.resource, result.availability);
-      return { ...result, resourceFeedback };
+      if (!['AVAILABLE', 'AVAILABLE_LIMITED', 'QUOTA_LOW'].includes(result.availability)) {
+        const resourceFeedback = await recordInvocationFailure({
+          readResources: revision => source.readResources(revision),
+          getResourceObservation: scope => source.getResourceObservation(scope),
+          recordResourceObservation: (value, expected) => source.recordResourceObservation!(value, expected),
+        }, selected.resource, result.availability);
+        result = { ...result, resourceFeedback };
+      }
+      // Persist negative feedback before lifting the fence. Any storage failure
+      // leaves the original intent pending across process restart.
+      source.finishResourceInvocation!(intent, result.availability);
+      return result;
     } catch {
       this.resourceFeedbackFailed = true;
       return { availability: 'EXECUTION_ERROR', resourceFeedback: 'FAILED',
-        response: 'Provider invocation failed and scoped failure state could not be recorded; environment repair and revalidation required' };
+        response: 'Invocation completion could not be persisted; reconcile preserved task artifacts and environment state before further dispatch' };
     }
   }
   private async invoke(input: Invocation): Promise<AgentResult> {

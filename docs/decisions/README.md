@@ -12,3 +12,5 @@ Accepted for Phase 1; implementation and certification status live separately in
 - [Foundation path identity and secret policy](008-foundation-identity-and-secret-policy.md)
 - [Scoped host configuration reconciliation](009-host-configuration-reconciliation.md)
 - [Task selection versus execution authority](010-task-tool-selection.md)
+- [Reversible evidence archival](011-evidence-archival.md)
+- [Durable resource invocation fencing](012-durable-resource-invocations.md)

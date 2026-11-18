@@ -85,7 +85,7 @@ stale. The file-scoped increment below supports explicit narrower dependencies. 
 needs a new decision ID and evidence for the new snapshot. Restoring old source
 does not silently reactivate stale or superseded decisions.
 
-Physical archival/compaction, semantic extraction, live session deltas, optional connectors
+Physical compaction/deletion, semantic extraction, live session deltas, optional connectors
 and native decision-authoring interfaces remain later increments.
 
 ## Review and follow-up
@@ -219,7 +219,7 @@ File scopes are explicit engineering claims about dependency completeness. Autho
 must include relevant configuration and contract files. Directory membership,
 unlisted imports, Git history and semantic relationships require a repository-wide
 scope or a later dependency model. Automatic scope inference, symbol-level claims,
-physical archival and verified provider-session deltas remain future work.
+physical compaction and verified provider-session deltas remain future work.
 
 This increment adds a trusted library authoring surface. The runtime's CLI/MCP
 surfaces expose the resulting state through their existing read operations. Source
@@ -246,3 +246,51 @@ contained 93 files, including the updated runtime modules, and whitespace checks
 passed. This record captures local verification. GitHub Actions records
 cross-platform checks for each pushed commit. Deployment and live provider
 qualification remain pending.
+
+## Reversible archival — 2026-11-13
+
+The next local storage increment implements lossless archive/restore operations
+over explicit evidence IDs. The existing retention report supplies eligibility and
+continues to report deletion as disabled. Operator CLI/library methods generate a
+digest-bound preview and apply it in one SQLite transaction with an append-only
+receipt. Physical evidence representation and canonical task events share the task
+database, with their existing ownership boundaries.
+
+The first archive transaction migrates the task schema to version 2. New readers
+accept both task versions, while environment state retains its own version. A
+versioned gzip/base64 envelope replaces each selected JSON body. Decode verifies
+the bounded original length and checksum, then the ordinary evidence schema,
+secret exclusions, content hash and provenance. Restore reproduces the exact
+original JSON bytes, including whitespace and metadata.
+
+Current HOT obligations block new archival. Historical and unreferenced records
+remain retrievable through existing query/read, hydration and replay paths. A later
+mandatory link can make an archived record logically HOT while its physical storage
+stays ARCHIVED. Required material remains available through exact decoding.
+
+The plan binds database scope, revisions, journal state, retention classification
+and affected byte hashes. Stale plans, wrong-database requests and conflicting
+operation IDs fail before mutation. Repeated operation IDs return their original
+receipt. Mid-batch failure rolls back records, migration and journal together.
+Recorded bytes shrink when archival succeeds. SQLite free pages and WAL files can
+retain allocated space until separately qualified maintenance.
+
+Archival is an explicit operator action. The MCP task surface retains its existing
+retrieval tools. Runtime downgrade compatibility, size limits, idempotency and
+recovery semantics are documented in the ADR. [ADR-011](../decisions/011-evidence-archival.md)
+
+### Verification
+
+The Windows build and complete suite passed **276/276** tests. The additional
+process-termination regression passed separately after that suite started. It
+exited during an evidence update, recovered the original records and version-1
+schema, then safely retried the same plan. Eleven archival cases cover exact
+Unicode/metadata restoration, restart and idempotency, protected eligibility,
+historical replay and later mandatory links, cross-database and stale previews,
+archive/restore transaction failures, ignored writes, corrupt archives and journals,
+bounded decompression, secret-bearing raw metadata, and normal CLI/MCP paths.
+
+The current-content secret scan checked 179 files with zero findings. The
+production dependency audit reported zero vulnerabilities, and the package dry-run
+included 95 files with the new storage module. Whitespace checks passed. This
+increment is local and uncommitted, with remote CI and deployment pending.
